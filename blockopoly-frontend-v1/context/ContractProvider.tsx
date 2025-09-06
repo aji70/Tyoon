@@ -5,7 +5,7 @@ import { useReadContract, useWriteContract, useAccount } from "wagmi";
 import PlayerABI from "./abi.json";
 import { Address } from "viem";
 
-const CONTRACT_ADDRESS = "0x67a9b540693D48f7e6a008D4323c4F831076f780" as Address;
+const CONTRACT_ADDRESS = "0xB3112600Cb3cAAe74EA768b33d4690A4940F97cd." as Address;
 
 type PlayerData = {
   username: string;

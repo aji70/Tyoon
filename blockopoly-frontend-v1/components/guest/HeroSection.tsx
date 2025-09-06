@@ -7,6 +7,7 @@ import { TypeAnimation } from 'react-type-animation';
 import { useRouter } from 'next/navigation';
 import { useAccount } from 'wagmi';
 import { usePlayerContract } from '@/context/ContractProvider';
+import { toast } from 'react-toastify';
 
 const HeroSection: React.FC = () => {
   const router = useRouter();
@@ -15,9 +16,6 @@ const HeroSection: React.FC = () => {
 
   const [gamerName, setGamerName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [registrationPending, setRegistrationPending] = useState(false);
   const [username, setUsername] = useState('');
 
   const {
@@ -30,8 +28,10 @@ const HeroSection: React.FC = () => {
   useEffect(() => {
     if (registeredError) {
       console.error('Registered error:', registeredError);
-      const msg = registeredError?.message || String(registeredError);
-      setError(msg);
+      toast.error(registeredError?.message || 'Failed to check registration status', {
+        position: 'top-right',
+        autoClose: 5000,
+      });
     }
     if (isUserRegistered) {
       setUsername(fetchedUsername || 'Unknown');
@@ -48,28 +48,34 @@ const HeroSection: React.FC = () => {
   const handleRouteToJoinRoom = () => router.push('/join-room');
 
   const handleRequest = async () => {
-    setError(null);
-    setSuccess(null);
-
     // Dummy data for testing
     const dummyAddress = '0x1234567890abcdef1234567890abcdef12345678';
     const name = gamerName.trim() || 'TestUser'; // Fallback to dummy username
 
     if (!address && !dummyAddress) {
-      setError('Please connect your wallet');
+      toast.error('Please connect your wallet', {
+        position: 'top-right',
+        autoClose: 5000,
+      });
       return;
     }
     if (!name) {
-      setError('Please enter a username');
+      toast.error('Please enter a username', {
+        position: 'top-right',
+        autoClose: 5000,
+      });
       return;
     }
 
     console.log('Calling registerPlayer with:', { name });
     setLoading(true);
-    setRegistrationPending(true);
+
+    const toastId = toast.loading('Registering on blockchain...', {
+      position: 'top-right',
+    });
 
     try {
-      // Perform blockchain registration (comment out for testing without blockchain)
+      // Perform blockchain registration
       await registerPlayer(name);
 
       // Call /register endpoint to save to database
@@ -87,63 +93,22 @@ const HeroSection: React.FC = () => {
       }
 
       const data = await response.json();
-      setSuccess(data.message || 'Registration successful!');
+      toast.update(toastId, {
+        render: data.message || 'Registration successful!',
+        type: 'success',
+        isLoading: false,
+        autoClose: 3000,
+      });
       setGamerName('');
-      setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
       console.error('Registration error:', err);
-      const msg = err?.message || 'Failed to register. Please try again.';
-      setError(msg);
-    } finally {
-      setLoading(false);
-      setRegistrationPending(false);
-    }
-  };
-
-  // Save username to backend without blockchain
-  const handleSaveUsername = async () => {
-    setError(null);
-    setSuccess(null);
-
-    // Dummy data for testing
-    const dummyAddress = '0x1234567890abcdef1234567890abcdef12345678';
-    const name = gamerName.trim() || 'TestUser'; // Fallback to dummy username
-
-    if (!address && !dummyAddress) {
-      setError('Please connect your wallet');
-      return;
-    }
-    if (!name) {
-      setError('Please enter a username');
-      return;
-    }
-
-    console.log('Sending to backend:', { walletAddress: address || dummyAddress, username: name, is_registered: true });
-    setLoading(true);
-
-    try {
-      const response = await fetch('http://localhost:5000/api/users/save', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ walletAddress: address || dummyAddress, username: name, is_registered: true }),
+      toast.update(toastId, {
+        render: err?.message || 'Failed to register. Please try again.',
+        type: 'error',
+        isLoading: false,
+        autoClose: 5000,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('Backend response:', data);
-      setSuccess(data.message || 'Username saved successfully!');
-    } catch (err: any) {
-      console.error('Backend save error:', err);
-      const msg = err.message || 'Failed to save username to backend.';
-      setError(msg);
     } finally {
-      setGamerName('');
       setLoading(false);
     }
   };
@@ -175,24 +140,17 @@ const HeroSection: React.FC = () => {
         </h1>
       </div>
       <main className="w-full h-full absolute top-0 left-0 z-20 bg-transparent flex flex-col lg:justify-center items-center gap-1">
-        {isUserRegistered && !registrationPending && !success && (
+        {isUserRegistered && !loading && (
           <div className="mt-20 md:mt-28 lg:mt-0">
             <p className="font-orbitron lg:text-[24px] md:text-[20px] text-[16px] font-[700] text-[#00F0FF] text-center">
               Welcome back, {username}!
             </p>
           </div>
         )}
-        {registrationPending && (
+        {loading && (
           <div className="mt-20 md:mt-28 lg:mt-0">
             <p className="font-orbitron lg:text-[24px] md:text-[20px] text-[16px] font-[700] text-[#00F0FF] text-center">
               Registering... Please wait.
-            </p>
-          </div>
-        )}
-        {success && (
-          <div className="mt-20 md:mt-28 lg:mt-0">
-            <p className="font-orbitron lg:text-[24px] md:text-[20px] text-[16px] font-[700] text-[#00F0FF] text-center">
-              {success}
             </p>
           </div>
         )}
@@ -243,7 +201,7 @@ const HeroSection: React.FC = () => {
           />
         </div>
         <div className="w-full flex flex-col justify-center items-center mt-3 gap-3">
-          {address && !isUserRegistered && !registrationPending && (
+          {address && !isUserRegistered && !loading && (
             <>
               <input
                 type="text"
@@ -306,67 +264,12 @@ const HeroSection: React.FC = () => {
                   )}
                 </span>
               </button>
-              <button
-                type="button"
-                className="relative group w-[260px] h-[52px] bg-transparent border-none p-0 overflow-hidden cursor-pointer"
-                disabled={loading || !gamerName.trim() || !address}
-                onClick={handleSaveUsername}
-              >
-                <svg
-                  width="260"
-                  height="52"
-                  viewBox="0 0 260 52"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="absolute top-0 left-0 w-full h-full transform scale-x-[-1]"
-                >
-                  <path
-                    d="M10 1H250C254.373 1 256.996 6.85486 254.601 10.5127L236.167 49.5127C235.151 51.0646 233.42 52 231.565 52H10C6.96244 52 4.5 49.5376 4.5 46.5V9.5C4.5 6.46243 6.96243 4 10 4Z"
-                    fill="#17FFFF"
-                    stroke="#0E282A"
-                    strokeWidth={1}
-                  />
-                </svg>
-                <span className="absolute inset-0 flex items-center justify-center text-[#010F10] text-[18px] -tracking-[2%] font-orbitron font-[700] z-10">
-                  {loading ? (
-                    <span className="flex items-center gap-2">
-                      <svg
-                        className="animate-spin h-4 w-4"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                        />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                        />
-                      </svg>
-                      Saving...
-                    </span>
-                  ) : (
-                    'Save Username'
-                  )}
-                </span>
-              </button>
             </>
           )}
           {!address && (
             <p className="text-gray-400 text-sm text-center mt-2">
               Please connect your wallet to continue.
             </p>
-          )}
-          {error && <p className="text-red-400 text-sm text-center mt-2">{error}</p>}
-          {!registrationPending && !isUserRegistered && success && (
-            <p className="text-green-400 text-sm text-center mt-2">{success}</p>
           )}
           {address && isUserRegistered && (
             <div className="flex justify-center items-center mt-2 gap-4">
