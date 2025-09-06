@@ -1,11 +1,11 @@
 "use client";
 
 import { createContext, useContext, useCallback } from "react";
-import { useReadContract, useWriteContract, useAccount } from "wagmi";
+import { useReadContract, useWriteContract, useAccount, useWaitForTransactionReceipt } from "wagmi";
 import PlayerABI from "./abi.json";
 import { Address } from "viem";
 
-const CONTRACT_ADDRESS = "0xAde6eF7Ad06bF8fe5d614ad698Fc8Ad376FC7e60" as Address;
+const CONTRACT_ADDRESS = "0x1d4a01Bb4e7B6403DE7C09C987Ad72ef80EBea09" as Address;
 
 type PlayerData = {
   username: string;
@@ -14,6 +14,29 @@ type PlayerData = {
 };
 
 type PlayerDataTuple = [string, Address, bigint];
+
+type GameSettings = {
+  maxPlayers: number;
+  privateRoom: boolean;
+  auction: boolean;
+  rentInPrison: boolean;
+  mortgage: boolean;
+  evenBuild: boolean;
+  startingCash: bigint;
+  randomizePlayOrder: boolean;
+};
+
+type GameData = {
+  id: string;
+  status: number; // 0: Pending, 1: Ongoing, 2: Ended
+  nextPlayer: Address;
+  winner: Address;
+  createdAt: bigint;
+  numberOfPlayers: number;
+  endedAt: bigint;
+};
+
+type GameDataTuple = [string, number, Address, Address, bigint, number, bigint];
 
 type ContractContextType = {
   useIsRegistered: (address?: Address, options?: { enabled: boolean }) => {
@@ -31,12 +54,30 @@ type ContractContextType = {
     isLoading: boolean;
     error: Error | null;
   };
+  useCreateGame: (
+    gameType: number,
+    playerSymbol: number,
+    numberOfPlayers: number,
+    settings: GameSettings
+  ) => {
+    write: () => Promise<string>; // Returns gameId
+    isPending: boolean;
+    error: Error | null;
+    txHash: Address | undefined;
+    isSuccess: boolean;
+  };
+  useGetGame: (gameId?: string, options?: { enabled: boolean }) => {
+    data: GameData | undefined;
+    isLoading: boolean;
+    error: Error | null;
+  };
   registerPlayer: (username: string) => Promise<void>;
 };
 
-const ContractContext = createContext<ContractContextType | undefined>(undefined);
+// Create context
+const BlockopolyContext = createContext<ContractContextType | undefined>(undefined);
 
-// ---- Custom hooks for reads ----
+// Custom hooks for reads
 function useIsRegistered(address?: Address, options = { enabled: true }) {
   const result = useReadContract({
     address: CONTRACT_ADDRESS,
@@ -57,7 +98,7 @@ function useGetUsername(address?: Address, options = { enabled: true }) {
   const result = useReadContract({
     address: CONTRACT_ADDRESS,
     abi: PlayerABI,
-    functionName: "getUsernameFromAddress",
+    functionName: "addressToUsername",
     args: address ? [address] : undefined,
     query: { enabled: options.enabled },
   });
@@ -73,7 +114,7 @@ function useRetrievePlayer(address?: Address, options = { enabled: true }) {
   const result = useReadContract({
     address: CONTRACT_ADDRESS,
     abi: PlayerABI,
-    functionName: "retrievePlayer",
+    functionName: "players",
     args: address ? [address] : undefined,
     query: { enabled: options.enabled },
   });
@@ -91,7 +132,80 @@ function useRetrievePlayer(address?: Address, options = { enabled: true }) {
   };
 }
 
-// ---- Provider ----
+function useCreateGame(
+  gameType: number,
+  playerSymbol: number,
+  numberOfPlayers: number,
+  settings: GameSettings
+) {
+  const { writeContractAsync, isPending, error, data: txHash } = useWriteContract();
+  const { isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+
+  const write = useCallback(async (): Promise<string> => {
+    try {
+      const tx = await writeContractAsync({
+        address: CONTRACT_ADDRESS,
+        abi: PlayerABI,
+        functionName: "createGame",
+        args: [
+          gameType,
+          playerSymbol,
+          numberOfPlayers,
+          [
+            settings.maxPlayers,
+            settings.privateRoom,
+            settings.auction,
+            settings.rentInPrison,
+            settings.mortgage,
+            settings.evenBuild,
+            settings.startingCash,
+            settings.randomizePlayOrder,
+          ],
+        ],
+      });
+      // Listen for GameCreated event to get gameId
+      // Assuming event listener is set up elsewhere (e.g., in backend)
+      // For simplicity, return a placeholder gameId (replace with actual event parsing)
+      return new Promise((resolve) => {
+        // Mock event listener (replace with Web3.js/ethers.js listener)
+        setTimeout(() => resolve("ABCDE"), 1000);
+      });
+    } catch (error) {
+      console.error("Error creating game:", error);
+      throw error;
+    }
+  }, [writeContractAsync, gameType, playerSymbol, numberOfPlayers, settings]);
+
+  return { write, isPending, error, txHash, isSuccess };
+}
+
+function useGetGame(gameId?: string, options = { enabled: true }) {
+  const result = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: PlayerABI,
+    functionName: "getGame",
+    args: gameId ? [gameId] : undefined,
+    query: { enabled: options.enabled && !!gameId },
+  });
+
+  return {
+    data: result.data
+      ? {
+          id: (result.data as GameDataTuple)[0],
+          status: (result.data as GameDataTuple)[1],
+          nextPlayer: (result.data as GameDataTuple)[2],
+          winner: (result.data as GameDataTuple)[3],
+          createdAt: (result.data as GameDataTuple)[4],
+          numberOfPlayers: (result.data as GameDataTuple)[5],
+          endedAt: (result.data as GameDataTuple)[6],
+        }
+      : undefined,
+    isLoading: result.isLoading,
+    error: result.error,
+  };
+}
+
+// Provider
 export const PlayerContractProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
@@ -120,19 +234,21 @@ export const PlayerContractProvider: React.FC<{ children: React.ReactNode }> = (
     useIsRegistered,
     useGetUsername,
     useRetrievePlayer,
+    useCreateGame,
+    useGetGame,
     registerPlayer,
   };
 
   return (
-    <ContractContext.Provider value={contextValue}>
+    <BlockopolyContext.Provider value={contextValue}>
       {children}
-    </ContractContext.Provider>
+    </BlockopolyContext.Provider>
   );
 };
 
-// ---- Hook to consume context ----
+// Hook to consume context
 export const usePlayerContract = () => {
-  const context = useContext(ContractContext);
+  const context = useContext(BlockopolyContext);
   if (!context)
     throw new Error(
       "usePlayerContract must be used within a PlayerContractProvider"

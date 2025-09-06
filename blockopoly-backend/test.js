@@ -24,7 +24,7 @@ async function main() {
   const contract = new ethers.Contract(process.env.CONTRACT_ADDRESS, abi, provider);
 
   try {
-    const get_username = await contract.getUsernameFromAddress("0x4246a99db07c10fce03ab238f68e5003ac5264a1");
+    const get_username = await contract.getUsernameFromAddress("0x09c5096ad92a3eb3b83165a4d177a53d3d754197");
     console.log("getUsernameFromAddress:", get_username);
   } catch (err) {
     console.error("Call failed:", err);

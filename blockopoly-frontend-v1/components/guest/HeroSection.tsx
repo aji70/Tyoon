@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import herobg from '@/public/heroBg.png';
 import Image from 'next/image';
-import { Dices, KeyRound } from 'lucide-react';
+import { Dices, KeyRound, Gamepad2 } from 'lucide-react'; // Added Gamepad2 for new button
 import { TypeAnimation } from 'react-type-animation';
 import { useRouter } from 'next/navigation';
 import { useAccount } from 'wagmi';
@@ -46,11 +46,11 @@ const HeroSection: React.FC = () => {
 
   const handleRouteToPrivateRoom = () => router.push('/game-settings');
   const handleRouteToJoinRoom = () => router.push('/join-room');
+  const handleRouteToCreateGame = () => router.push('/game-settings'); // New handler for Create Game
 
   const handleRequest = async () => {
-    // Dummy data for testing
     const dummyAddress = '0x1234567890abcdef1234567890abcdef12345678';
-    const name = gamerName.trim() || 'TestUser'; // Fallback to dummy username
+    const name = gamerName.trim() || 'TestUser';
 
     if (!address && !dummyAddress) {
       toast.error('Please connect your wallet', {
@@ -75,10 +75,8 @@ const HeroSection: React.FC = () => {
     });
 
     try {
-      // Perform blockchain registration
       await registerPlayer(name);
 
-      // Call /register endpoint to save to database
       const response = await fetch('http://localhost:5000/api/users/register', {
         method: 'POST',
         headers: {
@@ -98,10 +96,12 @@ const HeroSection: React.FC = () => {
         type: 'success',
         isLoading: false,
         autoClose: 3000,
+        onClose: () => {
+          // Refresh the page after toast closes
+          router.refresh();
+        },
       });
       setGamerName('');
-      // Refresh the page to update UI
-      router.refresh();
     } catch (err: any) {
       console.error('Registration error:', err);
       let errorMessage = err?.message || 'Failed to register. Please try again.';
@@ -205,6 +205,9 @@ const HeroSection: React.FC = () => {
             repeat={Infinity}
             className="font-orbitron lg:text-[40px] md:text-[30px] text-[20px] font-[700] text-[#F0F7F7] text-center block"
           />
+          <p className="font-dmSans font-[400] md:text-[18px] text-[14px] text-[#F0F7F7] mt-4">
+            Step into Blockopoly — the Web3 twist on the classic game of strategy, ownership, and fortune. Collect tokens, complete quests, and become the ultimate blockchain tycoon.
+          </p>
         </div>
         <div className="w-full flex flex-col justify-center items-center mt-3 gap-3">
           {address && !isUserRegistered && !loading && (
@@ -281,8 +284,34 @@ const HeroSection: React.FC = () => {
             <div className="flex justify-center items-center mt-2 gap-4">
               <button
                 type="button"
+                onClick={handleRouteToCreateGame}
+                className="relative group w-[227px] h-[40px] bg-transparent border-none p-0 overflow-hidden cursor-pointer"
+              >
+                <svg
+                  width="227"
+                  height="40"
+                  viewBox="0 0 227 40"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="absolute top-0 left-0 w-full h-full transform scale-x-[-1] scale-y-[-1]"
+                >
+                  <path
+                    d="M6 1H221C225.373 1 227.996 5.85486 225.601 9.5127L207.167 37.5127C206.151 39.0646 204.42 40 202.565 40H6C2.96244 40 0.5 37.5376 0.5 34.5V6.5C0.5 3.46243 2.96243 1 6 1Z"
+                    fill="#003B3E"
+                    stroke="#003B3E"
+                    strokeWidth={1}
+                    className="group-hover:stroke-[#00F0FF] transition-all duration-300 ease-in-out"
+                  />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-[#00F0FF] capitalize text-[12px] font-dmSans font-medium z-10">
+                  <Gamepad2 className="mr-1.5 w-[16px] h-[16px]" />
+                  Create Game
+                </span>
+              </button>
+              <button
+                type="button"
                 onClick={handleRouteToJoinRoom}
-                className="relative left-2 group w-[140px] h-[40px] bg-transparent border-none p-0 overflow-hidden cursor-pointer"
+                className="relative group w-[140px] h-[40px] bg-transparent border-none p-0 overflow-hidden cursor-pointer"
               >
                 <svg
                   width="140"
