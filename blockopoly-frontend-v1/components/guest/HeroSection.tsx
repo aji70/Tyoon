@@ -51,11 +51,14 @@ const HeroSection: React.FC = () => {
     setError(null);
     setSuccess(null);
 
-    if (!address) {
+    // Dummy data for testing
+    const dummyAddress = '0x1234567890abcdef1234567890abcdef12345678';
+    const name = gamerName.trim() || 'TestUser'; // Fallback to dummy username
+
+    if (!address && !dummyAddress) {
       setError('Please connect your wallet');
       return;
     }
-    const name = gamerName.trim();
     if (!name) {
       setError('Please enter a username');
       return;
@@ -66,8 +69,25 @@ const HeroSection: React.FC = () => {
     setRegistrationPending(true);
 
     try {
+      // Perform blockchain registration (comment out for testing without blockchain)
       await registerPlayer(name);
-      setSuccess('Registration successful!');
+
+      // Call /register endpoint to save to database
+      const response = await fetch('http://localhost:5000/api/users/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ walletAddress: address || dummyAddress, username: name }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setSuccess(data.message || 'Registration successful!');
       setGamerName('');
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
@@ -77,6 +97,54 @@ const HeroSection: React.FC = () => {
     } finally {
       setLoading(false);
       setRegistrationPending(false);
+    }
+  };
+
+  // Save username to backend without blockchain
+  const handleSaveUsername = async () => {
+    setError(null);
+    setSuccess(null);
+
+    // Dummy data for testing
+    const dummyAddress = '0x1234567890abcdef1234567890abcdef12345678';
+    const name = gamerName.trim() || 'TestUser'; // Fallback to dummy username
+
+    if (!address && !dummyAddress) {
+      setError('Please connect your wallet');
+      return;
+    }
+    if (!name) {
+      setError('Please enter a username');
+      return;
+    }
+
+    console.log('Sending to backend:', { walletAddress: address || dummyAddress, username: name, is_registered: true });
+    setLoading(true);
+
+    try {
+      const response = await fetch('http://localhost:5000/api/users/save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ walletAddress: address || dummyAddress, username: name, is_registered: true }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('Backend response:', data);
+      setSuccess(data.message || 'Username saved successfully!');
+    } catch (err: any) {
+      console.error('Backend save error:', err);
+      const msg = err.message || 'Failed to save username to backend.';
+      setError(msg);
+    } finally {
+      setGamerName('');
+      setLoading(false);
     }
   };
 
@@ -90,7 +158,6 @@ const HeroSection: React.FC = () => {
 
   return (
     <section className="w-full lg:h-screen md:h-[calc(100vh-87px)] h-screen relative overflow-x-hidden md:mb-20 mb-10">
-      {/* Background */}
       <div className="w-full h-full overflow-hidden">
         <Image
           src={herobg}
@@ -102,17 +169,12 @@ const HeroSection: React.FC = () => {
           quality={100}
         />
       </div>
-
-      {/* Big title behind */}
       <div className="w-full h-auto absolute top-0 left-0 flex items-center justify-center">
         <h1 className="text-center uppercase font-kronaOne font-normal text-transparent big-hero-text w-full text-[40px] sm:text-[40px] md:text-[80px] lg:text-[135px] relative before:absolute before:content-[''] before:w-full before:h-full before:bg-gradient-to-b before:from-transparent lg:before:via-[#010F10]/80 before:to-[#010F10] before:top-0 before:left-0 before:z-10">
           BLOCKOPOLY
         </h1>
       </div>
-
-      {/* Foreground content */}
       <main className="w-full h-full absolute top-0 left-0 z-20 bg-transparent flex flex-col lg:justify-center items-center gap-1">
-        {/* Logged-in / pending / success messages */}
         {isUserRegistered && !registrationPending && !success && (
           <div className="mt-20 md:mt-28 lg:mt-0">
             <p className="font-orbitron lg:text-[24px] md:text-[20px] text-[16px] font-[700] text-[#00F0FF] text-center">
@@ -134,8 +196,6 @@ const HeroSection: React.FC = () => {
             </p>
           </div>
         )}
-
-        {/* Top animated tagline (Conquer / Build / Trade) */}
         <div className="flex justify-center items-center md:gap-6 gap-3 mt-4 md:mt-6 lg:mt-4">
           <TypeAnimation
             sequence={[
@@ -158,16 +218,12 @@ const HeroSection: React.FC = () => {
             className="font-orbitron lg:text-[40px] md:text-[30px] text-[20px] font-[700] text-[#F0F7F7] text-center block"
           />
         </div>
-
-        {/* THE BLOCK heading */}
         <h1 className="block-text font-[900] font-orbitron lg:text-[116px] md:text-[98px] text-[54px] lg:leading-[120px] md:leading-[100px] leading-[60px] tracking-[-0.02em] uppercase text-[#17ffff] relative">
           THE BLOCK
           <span className="absolute top-0 left-[69%] text-[#0FF0FC] font-dmSans font-[700] md:text-[27px] text-[18px] rotate-12 animate-pulse">
             ?
           </span>
         </h1>
-
-        {/* Bottom TypeAnimation */}
         <div className="w-full px-4 md:w-[70%] lg:w-[55%] text-center text-[#F0F7F7] -tracking-[2%]">
           <TypeAnimation
             sequence={[
@@ -186,10 +242,7 @@ const HeroSection: React.FC = () => {
             className="font-orbitron lg:text-[40px] md:text-[30px] text-[20px] font-[700] text-[#F0F7F7] text-center block"
           />
         </div>
-
-        {/* Registration / Buttons area */}
         <div className="w-full flex flex-col justify-center items-center mt-3 gap-3">
-          {/* Show input + Let's Go only when wallet connected AND user NOT registered AND not pending */}
           {address && !isUserRegistered && !registrationPending && (
             <>
               <input
@@ -202,7 +255,6 @@ const HeroSection: React.FC = () => {
                 placeholder="input your name"
                 className="w-[80%] md:w-[260px] h-[45px] bg-[#0E1415] rounded-[12px] border-[1px] border-[#003B3E] outline-none px-3 text-[#17ffff] font-orbitron font-[400] text-[16px] text-center placeholder:text-[#455A64] placeholder:font-dmSans placeholder:text-[16px]"
               />
-
               <button
                 type="button"
                 className="relative group w-[260px] h-[52px] bg-transparent border-none p-0 overflow-hidden cursor-pointer"
@@ -224,7 +276,6 @@ const HeroSection: React.FC = () => {
                     strokeWidth={1}
                   />
                 </svg>
-
                 <span className="absolute inset-0 flex items-center justify-center text-[#010F10] text-[18px] -tracking-[2%] font-orbitron font-[700] z-10">
                   {loading ? (
                     <span className="flex items-center gap-2">
@@ -255,23 +306,68 @@ const HeroSection: React.FC = () => {
                   )}
                 </span>
               </button>
+              <button
+                type="button"
+                className="relative group w-[260px] h-[52px] bg-transparent border-none p-0 overflow-hidden cursor-pointer"
+                disabled={loading || !gamerName.trim() || !address}
+                onClick={handleSaveUsername}
+              >
+                <svg
+                  width="260"
+                  height="52"
+                  viewBox="0 0 260 52"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="absolute top-0 left-0 w-full h-full transform scale-x-[-1]"
+                >
+                  <path
+                    d="M10 1H250C254.373 1 256.996 6.85486 254.601 10.5127L236.167 49.5127C235.151 51.0646 233.42 52 231.565 52H10C6.96244 52 4.5 49.5376 4.5 46.5V9.5C4.5 6.46243 6.96243 4 10 4Z"
+                    fill="#17FFFF"
+                    stroke="#0E282A"
+                    strokeWidth={1}
+                  />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-[#010F10] text-[18px] -tracking-[2%] font-orbitron font-[700] z-10">
+                  {loading ? (
+                    <span className="flex items-center gap-2">
+                      <svg
+                        className="animate-spin h-4 w-4"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                        />
+                      </svg>
+                      Saving...
+                    </span>
+                  ) : (
+                    'Save Username'
+                  )}
+                </span>
+              </button>
             </>
           )}
-
-          {/* Show helpful message when wallet not connected */}
           {!address && (
             <p className="text-gray-400 text-sm text-center mt-2">
               Please connect your wallet to continue.
             </p>
           )}
-
-          {/* Errors & success */}
           {error && <p className="text-red-400 text-sm text-center mt-2">{error}</p>}
           {!registrationPending && !isUserRegistered && success && (
             <p className="text-green-400 text-sm text-center mt-2">{success}</p>
           )}
-
-          {/* If registered, show actions */}
           {address && isUserRegistered && (
             <div className="flex justify-center items-center mt-2 gap-4">
               <button
@@ -300,7 +396,6 @@ const HeroSection: React.FC = () => {
                   Join Room
                 </span>
               </button>
-
               <button
                 type="button"
                 onClick={handleRouteToPrivateRoom}

@@ -1,24 +1,42 @@
+// src/utils/contract.js
 import { ethers } from 'ethers';
 import dotenv from 'dotenv';
-import abi from './abi.json' assert { type: 'json' }; // adjust path if needed
+import abi from './abi.json' with { type: 'json' };
 
 dotenv.config();
 
 const { BASE_RPC_URL, CONTRACT_ADDRESS } = process.env;
 
-// Provider (connects to Base RPC)
-const provider = new ethers.JsonRpcProvider(BASE_RPC_URL);
+// Initialize provider
+const provider = new ethers.JsonRpcProvider(BASE_RPC_URL, {
+  chainId: 84532,
+  name: 'base-sepolia',
+});
 
-// Contract instance
+// Verify contract exists
+async function verifyContract() {
+  try {
+    const code = await provider.getCode(CONTRACT_ADDRESS);
+    if (code === '0x') {
+      console.error('No contract found at address:', CONTRACT_ADDRESS);
+      throw new Error('No contract deployed at the specified address');
+    }
+    console.log('Contract code:', code.slice(0, 20) + '...');
+  } catch (err) {
+    console.error('Failed to verify contract:', err);
+    throw err;
+  }
+}
+
+// Create contract instance
 const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, provider);
-
-// --- Blockchain helper functions ---
 
 /**
  * Check if a wallet address is registered on-chain
  */
 export async function checkIsRegistered(address) {
   try {
+    await verifyContract(); // Ensure contract exists before calling
     const result = await contract.isRegistered(address);
     return result;
   } catch (err) {
@@ -32,6 +50,7 @@ export async function checkIsRegistered(address) {
  */
 export async function getUsername(address) {
   try {
+    await verifyContract(); // Ensure contract exists before calling
     const username = await contract.getUsernameFromAddress(address);
     return username;
   } catch (err) {
