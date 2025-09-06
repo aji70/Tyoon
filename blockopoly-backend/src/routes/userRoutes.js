@@ -1,43 +1,51 @@
 import express from 'express';
 import { pool } from '../config/db.js';
-import { checkIsRegistered, getUsername } from '../utils/contract.js';
 import { ethers } from 'ethers';
 
 const router = express.Router();
 
-// Save or update username (no blockchain checks)
+// Save or update username (no blockchain checks) - Kept for reference, but unused
 router.post('/save', async (req, res) => {
   const { walletAddress, username, is_registered } = req.body;
 
-  // Input validation
   if (!walletAddress || !username) {
     return res.status(400).json({ error: 'Wallet address and username are required' });
   }
 
-  // Validate wallet address format
   if (!ethers.isAddress(walletAddress)) {
     return res.status(400).json({ error: 'Invalid wallet address' });
   }
 
-  // Validate username
   const sanitizedUsername = username.trim();
   if (sanitizedUsername.length < 3 || sanitizedUsername.length > 255) {
     return res.status(400).json({ error: 'Username must be between 3 and 255 characters' });
   }
 
   try {
-    // Upsert user into database
     const query = `
-      INSERT INTO users (wallet_address, username, is_registered, created_at)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO users (
+        wallet_address, username, is_registered, balance, last_game, active,
+        total_games_played, total_games_completed, total_games_won, created_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       ON CONFLICT (wallet_address)
-      DO UPDATE SET username = EXCLUDED.username, is_registered = EXCLUDED.is_registered, updated_at = $4
-      RETURNING wallet_address, username, is_registered, created_at, updated_at;
+      DO UPDATE SET 
+        username = EXCLUDED.username, 
+        is_registered = EXCLUDED.is_registered, 
+        updated_at = EXCLUDED.updated_at
+      RETURNING *;
     `;
     const values = [
       walletAddress.toLowerCase(),
       sanitizedUsername,
-      is_registered ?? true, // Default to true if not provided
+      is_registered ?? true,
+      0,
+      null, // last_game
+      false, // active
+      0, // total_games_played
+      0, // total_games_completed
+      0, // total_games_won
+      Math.floor(Date.now() / 1000),
       Math.floor(Date.now() / 1000),
     ];
     const { rows } = await pool.query(query, values);
@@ -48,11 +56,11 @@ router.post('/save', async (req, res) => {
     });
   } catch (error) {
     console.error('Save username error:', error);
-    res.status(500).json({ error: 'Failed to save username' });
+    res.status(500).json({ error: 'Failed to save username: ' + error.message });
   }
 });
 
-// Register a new user with blockchain validation
+// Register a new user (no blockchain validation, trusts frontend)
 router.post('/register', async (req, res) => {
   const { walletAddress, username } = req.body;
 
@@ -70,7 +78,6 @@ router.post('/register', async (req, res) => {
   }
 
   try {
-    // Check if user already exists in the database
     const { rows } = await pool.query(
       'SELECT wallet_address FROM users WHERE wallet_address = $1',
       [walletAddress.toLowerCase()]
@@ -79,30 +86,24 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'User already exists in database' });
     }
 
-    // Check blockchain registration
-    const isRegistered = await checkIsRegistered(walletAddress);
-    if (!isRegistered) {
-      return res.status(400).json({ error: 'User not registered on blockchain' });
-    }
-
-    // Verify username matches blockchain record
-    const blockchainUsername = await getUsername(walletAddress);
-    if (blockchainUsername !== sanitizedUsername) {
-      return res.status(400).json({ error: 'Username does not match blockchain record' });
-    }
-
-    // Ensure is_registered is a boolean
-    const isRegisteredValue = isRegistered ?? true; // Fallback to true if null/undefined
-
     const query = `
-      INSERT INTO users (wallet_address, username, is_registered, created_at)
-      VALUES ($1, $2, $3, $4)
-      RETURNING wallet_address, username, is_registered, created_at;
+      INSERT INTO users (
+        wallet_address, username, is_registered, balance, last_game, active,
+        total_games_played, total_games_completed, total_games_won, created_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING *;
     `;
     const values = [
       walletAddress.toLowerCase(),
       sanitizedUsername,
-      isRegisteredValue,
+      true, // Assume registered since frontend succeeded
+      0,
+      null, // last_game
+      false, // active
+      0, // total_games_played
+      0, // total_games_completed
+      0, // total_games_won
       Math.floor(Date.now() / 1000),
     ];
     const { rows: newUser } = await pool.query(query, values);
@@ -110,7 +111,7 @@ router.post('/register', async (req, res) => {
     res.status(201).json({ message: 'User registered successfully', user: newUser[0] });
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ error: 'Failed to register user' });
+    res.status(500).json({ error: 'Failed to register user: ' + error.message });
   }
 });
 
@@ -128,7 +129,7 @@ router.get('/:address', async (req, res) => {
     res.json(rows[0]);
   } catch (error) {
     console.error('Fetch user error:', error);
-    res.status(500).json({ error: 'Failed to fetch user' });
+    res.status(500).json({ error: 'Failed to fetch user: ' + error.message });
   }
 });
 
@@ -157,21 +158,25 @@ router.put('/:address', async (req, res) => {
     res.json({ message: 'User updated successfully', user: rows[0] });
   } catch (error) {
     console.error('Update user error:', error);
-    res.status(500).json({ error: 'Failed to update user' });
+    res.status(500).json({ error: 'Failed to update user: ' + error.message });
   }
 });
 
-// Check user registration status
+// Check user registration status (optional, kept for completeness)
 router.get('/:address/status', async (req, res) => {
   const { address } = req.params;
 
   try {
-    const isRegistered = await checkIsRegistered(address);
-    const username = isRegistered ? await getUsername(address) : null;
-    res.json({ isRegistered, username });
+    const { rows } = await pool.query('SELECT is_registered, username FROM users WHERE wallet_address = $1', [
+      address.toLowerCase(),
+    ]);
+    if (rows.length === 0) {
+      return res.json({ isRegistered: false, username: null });
+    }
+    res.json({ isRegistered: rows[0].is_registered, username: rows[0].username });
   } catch (error) {
     console.error('Status check error:', error);
-    res.status(500).json({ error: 'Failed to check registration status' });
+    res.status(500).json({ error: 'Failed to check registration status: ' + error.message });
   }
 });
 

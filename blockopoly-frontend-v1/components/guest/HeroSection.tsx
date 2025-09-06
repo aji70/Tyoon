@@ -100,10 +100,16 @@ const HeroSection: React.FC = () => {
         autoClose: 3000,
       });
       setGamerName('');
+      // Refresh the page to update UI
+      router.refresh();
     } catch (err: any) {
       console.error('Registration error:', err);
+      let errorMessage = err?.message || 'Failed to register. Please try again.';
+      if (err.message.includes('InvalidAddressError')) {
+        errorMessage = 'Invalid contract address. Please contact support.';
+      }
       toast.update(toastId, {
-        render: err?.message || 'Failed to register. Please try again.',
+        render: errorMessage,
         type: 'error',
         isLoading: false,
         autoClose: 5000,
