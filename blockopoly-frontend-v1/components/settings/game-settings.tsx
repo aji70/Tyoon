@@ -17,17 +17,28 @@ import { FaHandHoldingDollar } from 'react-icons/fa6';
 import { AiOutlineDollarCircle } from 'react-icons/ai';
 import { FaRandom } from 'react-icons/fa';
 import { useRouter } from 'next/navigation';
-import { toast } from 'react-toastify';
 import { useAccount } from 'wagmi';
 import { usePlayerContract } from '@/context/ContractProvider';
-import { pool } from '../../../blockopoly-backend/src/config/db'; // Import the pool from your database configuration
+import { toast } from 'react-toastify';
+
+// Define settings interface
+interface Settings {
+  maxPlayers: string;
+  privateRoom: boolean;
+  auction: boolean;
+  rentInPrison: boolean;
+  mortgage: boolean;
+  evenBuild: boolean;
+  startingCash: string;
+  randomPlayOrder: boolean;
+}
 
 const GameSettings = () => {
   const router = useRouter();
   const { address } = useAccount();
-  const { useCreateGame, useIsRegistered } = usePlayerContract();
+  const { useIsRegistered, useCreateGame } = usePlayerContract();
 
-  const [settings, setSettings] = useState({
+  const [settings, setSettings] = useState<Settings>({
     maxPlayers: '2',
     privateRoom: false,
     auction: false,
@@ -42,11 +53,11 @@ const GameSettings = () => {
     enabled: !!address,
   });
 
-  const gameType = settings.privateRoom ? 1 : 0; // 0 for PublicGame, 1 for PrivateGame
-  const playerSymbol = 0; // Example: Use a default symbol (e.g., 'Hat'). Adjust as needed.
+  const gameType = settings.privateRoom ? 1 : 0; // 0: PublicGame, 1: PrivateGame
+  const playerSymbol = 0; // Default to Hat
   const numberOfPlayers = parseInt(settings.maxPlayers, 10);
 
-  const { write: createGame, isPending, error: contractError, isSuccess } = useCreateGame(
+  const { write: createGame, isPending, error: contractError, txHash } = useCreateGame(
     gameType,
     playerSymbol,
     numberOfPlayers,
@@ -62,7 +73,7 @@ const GameSettings = () => {
     }
   );
 
-  const handleSettingChange = (key: string, value: string | boolean) => {
+  const handleSettingChange = (key: keyof Settings, value: string | boolean) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -80,7 +91,7 @@ const GameSettings = () => {
         position: 'top-right',
         autoClose: 5000,
       });
-      router.push('/'); // Redirect to registration page
+      router.push('/');
       return;
     }
 
@@ -89,80 +100,26 @@ const GameSettings = () => {
     });
 
     try {
-      // Step 1: Create game on the blockchain
+      console.log('Calling createGame with settings:', settings); // Debug log
       const gameId = await createGame();
+      if (!gameId || gameId === 0n) {
+        throw new Error('Invalid game ID retrieved');
+      }
 
-      // Step 2: Save game settings to the database
-      await pool.query(
-        `
-        INSERT INTO game_settings (
-          game_id, max_players, private_room, auction, rent_in_prison,
-          mortgage, even_build, starting_cash, randomize_play_order
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      `,
-        [
-          gameId,
-          settings.maxPlayers,
-          settings.privateRoom,
-          settings.auction,
-          settings.rentInPrison,
-          settings.mortgage,
-          settings.evenBuild,
-          settings.startingCash,
-          settings.randomPlayOrder,
-        ]
-      );
-
-      // Step 3: Save game details to the games table
-      await pool.query(
-        `
-        INSERT INTO games (
-          id, status, created_at, number_of_players, ended_at, created_by,
-          mode, players_joined, is_initialised, ready_to_start, rolls_count,
-          rolls_times, has_thrown_dice
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-      `,
-        [
-          gameId,
-          'Pending', // Initial status
-          Math.floor(Date.now() / 1000), // created_at (Unix timestamp)
-          numberOfPlayers,
-          0, // ended_at (set to 0 for now)
-          address,
-          settings.privateRoom ? 'PrivateGame' : 'PublicGame',
-          1, // players_joined (creator joins by default)
-          false, // is_initialised
-          false, // ready_to_start
-          0, // rolls_count
-          0, // rolls_times
-          false, // has_thrown_dice
-        ]
-      );
-
-      // Step 4: Add creator to game_players_map
-      await pool.query(
-        `
-        INSERT INTO game_players_map (game_id, player_address, is_in_game)
-        VALUES ($1, $2, $3)
-      `,
-        [gameId, address, true]
-      );
+      const gameIdStr = gameId.toString(); // Convert bigint to string for URL
+      console.log('Game created with ID:', gameIdStr, 'Transaction hash:', txHash); // Debug log
 
       toast.update(toastId, {
-        render: 'Game created successfully! Starting game...',
+        render: `Game created successfully! Starting game with ID: ${gameIdStr}`,
         type: 'success',
         isLoading: false,
         autoClose: 3000,
-        onClose: () => {
-          router.push(`/game-room-loading?gameId=${gameId}`);
-        },
+        onClose: () => router.push(`/game-room-loading?gameId=${gameIdStr}`),
       });
     } catch (err: any) {
-      console.error('Error creating game:', err);
-      const errorMessage =
-        contractError?.message || err?.message || 'Failed to create game. Please try again.';
+      console.error('Error creating game:', err, 'Transaction hash:', txHash);
       toast.update(toastId, {
-        render: errorMessage,
+        render: contractError?.message || err.message || 'Failed to create game. Please try again.',
         type: 'error',
         isLoading: false,
         autoClose: 5000,
