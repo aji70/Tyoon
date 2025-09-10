@@ -1,8 +1,8 @@
 {
-    "name": "paycrypt-backend",
+    "name": "base-monopoly-backend",
     "version": "1.0.0",
     "type": "module",
-    "description": "PayCrypt Backend",
+    "description": "Base Monopoly Backend",
     "main": "server.js",
     "scripts": {
         "dev": "nodemon server.js",

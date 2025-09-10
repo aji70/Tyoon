@@ -10,7 +10,10 @@ import gamesRoutes from "./routes/games.js";
 import gameSettingsRoutes from "./routes/game-settings.js";
 import gamePlayersRoutes from "./routes/game-players.js";
 import gamePlayHistoryRoutes from "./routes/game-play-history.js";
-import gameTradeRoutes from "./routes/game-trades.js";
+import gameTradesRoutes from "./routes/game-trades.js";
+import chancesRoutes from "./routes/chances.js";
+import communityChestsRoutes from "./routes/community-chests.js";
+import propertiesRoutes from "./routes/properties.js";
 
 // Load environment variables
 dotenv.config();
@@ -47,7 +50,10 @@ app.use("/api/games", gamesRoutes);
 app.use("/api/game-settings", gameSettingsRoutes);
 app.use("/api/game-players", gamePlayersRoutes);
 app.use("/api/game-play-history", gamePlayHistoryRoutes);
-app.use("/api/game-trades", gameTradeRoutes);
+app.use("/api/game-trades", gameTradesRoutes);
+app.use("/api/chances", chancesRoutes);
+app.use("/api/community-chests", communityChestsRoutes);
+app.use("/api/properties", propertiesRoutes);
 
 // 404 handler
 app.use("*", (req, res) => {
