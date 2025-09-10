@@ -1,5 +1,7 @@
 import Game from "../models/Game.js";
 import GameSetting from "../models/GameSetting.js";
+import GamePlayer from "../models/GamePlayer.js";
+import User from "../models/User.js";
 
 /**
  * Game Controller
@@ -13,25 +15,58 @@ const gameController = {
 
   async create(req, res) {
     try {
-      // 1. Create game
-      const game = await Game.create(req.body);
+      const {
+        code,
+        mode,
+        user_id,
+        symbol,
+        number_of_players,
+        status,
+        settings,
+      } = req.body;
+      const user = await User.findById(user_id);
+      if (!user) {
+        return res.status(422).json({ message: "User not found" });
+      }
+      const game = await Game.create({
+        code,
+        mode,
+        creator_id: user.id,
+        next_player_id: user.id,
+        number_of_players,
+        status,
+      });
 
-      // 2. Insert default game settings automatically
-      const defaultSettings = {
+      const gameSettingsPayload = {
         game_id: game.id,
-        auction: false,
-        rent_in_prison: false,
-        mortgage: false,
-        even_build: false,
-        randomize_play_order: false,
-        starting_cash: 1500,
+        auction: settings.auction,
+        rent_in_prison: settings.rent_in_prison,
+        mortgage: settings.mortgage,
+        even_build: settings.even_build,
+        randomize_play_order: settings.randomize_play_order,
+        starting_cash: settings.starting_cash,
       };
 
-      const settings = await GameSetting.create(defaultSettings);
+      const game_settings = await GameSetting.create(gameSettingsPayload);
+
+      const gamePlayersPayload = {
+        game_id: game.id,
+        user_id: user.id,
+        address: user.address,
+        balance: settings.starting_cash,
+        position: 0,
+        turn_order: 1,
+        symbol: symbol,
+        chance_jail_card: false,
+        community_chest_jail_card: false,
+      };
+
+      const game_players = await GamePlayer.create(gamePlayersPayload);
 
       res.status(201).json({
         ...game,
-        settings, // include settings in response
+        settings: game_settings,
+        players: game_players,
       });
     } catch (error) {
       console.error("Error creating game with settings:", error);

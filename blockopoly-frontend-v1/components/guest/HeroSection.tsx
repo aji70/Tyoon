@@ -1,116 +1,112 @@
-'use client';
-import React, { useEffect, useState } from 'react';
-import herobg from '@/public/heroBg.png';
-import Image from 'next/image';
-import { Dices, KeyRound, Gamepad2 } from 'lucide-react'; // Added Gamepad2 for new button
-import { TypeAnimation } from 'react-type-animation';
-import { useRouter } from 'next/navigation';
-import { useAccount } from 'wagmi';
-import { usePlayerContract } from '@/context/ContractProvider';
-import { toast } from 'react-toastify';
+"use client";
+import React, { useEffect, useState } from "react";
+import herobg from "@/public/heroBg.png";
+import Image from "next/image";
+import { Dices, KeyRound, Gamepad2 } from "lucide-react"; // Added Gamepad2 for new button
+import { TypeAnimation } from "react-type-animation";
+import { useRouter } from "next/navigation";
+import { useAccount } from "wagmi";
+import { usePlayerContract } from "@/context/ContractProvider";
+import { toast } from "react-toastify";
+import { apiClient } from "@/lib/api";
+import { User } from "@/lib/types/users";
 
 const HeroSection: React.FC = () => {
   const router = useRouter();
   const { address, isConnecting } = useAccount();
-  const { useIsRegistered, useGetUsername, registerPlayer } = usePlayerContract();
-
-  const [gamerName, setGamerName] = useState('');
+  const { useIsRegistered, useGetUsername, registerPlayer } =
+    usePlayerContract();
   const [loading, setLoading] = useState(false);
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState("");
 
   const {
     data: isUserRegistered,
     isLoading: isRegisteredLoading,
     error: registeredError,
   } = useIsRegistered(address, { enabled: !!address });
-  const { data: fetchedUsername } = useGetUsername(address, { enabled: !!address });
+  const { data: fetchedUsername } = useGetUsername(address, {
+    enabled: !!address,
+  });
 
   useEffect(() => {
     if (registeredError) {
-      console.error('Registered error:', registeredError);
-      toast.error(registeredError?.message || 'Failed to check registration status', {
-        position: 'top-right',
-        autoClose: 5000,
-      });
+      console.error("Registered error:", registeredError);
+      toast.error(
+        registeredError?.message || "Failed to check registration status",
+        {
+          position: "top-right",
+          autoClose: 5000,
+        }
+      );
     }
     if (isUserRegistered) {
-      setUsername(fetchedUsername || 'Unknown');
+      setUsername(fetchedUsername || "Unknown");
     } else {
-      setUsername('');
+      setUsername("");
     }
   }, [isUserRegistered, fetchedUsername, registeredError]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setGamerName(e.target.value);
+    setUsername(e.target.value);
   };
 
-  const handleRouteToPrivateRoom = () => router.push('/game-settings');
-  const handleRouteToJoinRoom = () => router.push('/join-room');
-  const handleRouteToCreateGame = () => router.push('/game-settings'); // New handler for Create Game
+  const handleRouteToPrivateRoom = () => router.push("/game-settings");
+  const handleRouteToJoinRoom = () => router.push("/join-room");
+  const handleRouteToCreateGame = () => router.push("/game-settings"); // New handler for Create Game
 
   const handleRequest = async () => {
-    const dummyAddress = '0x1234567890abcdef1234567890abcdef12345678';
-    const name = gamerName.trim() || 'TestUser';
-
-    if (!address && !dummyAddress) {
-      toast.error('Please connect your wallet', {
-        position: 'top-right',
+    if (!address) {
+      toast.error("Please connect your wallet", {
+        position: "top-right",
         autoClose: 5000,
       });
       return;
     }
-    if (!name) {
-      toast.error('Please enter a username', {
-        position: 'top-right',
+    if (!username) {
+      toast.error("Please enter a username", {
+        position: "top-right",
         autoClose: 5000,
       });
       return;
     }
-
-    console.log('Calling registerPlayer with:', { name });
     setLoading(true);
 
-    const toastId = toast.loading('Registering on blockchain...', {
-      position: 'top-right',
+    const toastId = toast.loading("Registering on blockchain...", {
+      position: "top-right",
     });
 
     try {
-      await registerPlayer(name);
+      await registerPlayer(username);
 
-      const response = await fetch('http://localhost:5000/api/users/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ walletAddress: address || dummyAddress, username: name }),
+      const response = await apiClient.post<User>("/users", {
+        username,
+        address,
+        chain: "Base",
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+      if (!response) {
+        toast.error("Failed to register. Please try again.");
       }
 
-      const data = await response.json();
       toast.update(toastId, {
-        render: data.message || 'Registration successful!',
-        type: 'success',
+        render: "Registration successful!",
+        type: "success",
         isLoading: false,
         autoClose: 3000,
         onClose: () => {
-          // Refresh the page after toast closes
           router.refresh();
         },
       });
-      setGamerName('');
     } catch (err: any) {
-      console.error('Registration error:', err);
-      let errorMessage = err?.message || 'Failed to register. Please try again.';
-      if (err.message.includes('InvalidAddressError')) {
-        errorMessage = 'Invalid contract address. Please contact support.';
+      console.error("Registration error:", err);
+      let errorMessage =
+        err?.message || "Failed to register. Please try again.";
+      if (err.message.includes("InvalidAddressError")) {
+        errorMessage = "Invalid contract address. Please contact support.";
       }
       toast.update(toastId, {
         render: errorMessage,
-        type: 'error',
+        type: "error",
         isLoading: false,
         autoClose: 5000,
       });
@@ -122,13 +118,15 @@ const HeroSection: React.FC = () => {
   if (isConnecting) {
     return (
       <div className="w-full h-screen flex items-center justify-center">
-        <p className="font-orbitron text-[#00F0FF] text-[16px]">Connecting to wallet...</p>
+        <p className="font-orbitron text-[#00F0FF] text-[16px]">
+          Connecting to wallet...
+        </p>
       </div>
     );
   }
 
   return (
-    <section className="w-full lg:h-screen md:h-[calc(100vh-87px)] h-screen relative overflow-x-hidden md:mb-20 mb-10">
+    <section className="z-0 w-full lg:h-screen md:h-[calc(100vh-87px)] h-screen relative overflow-x-hidden md:mb-20 mb-10">
       <div className="w-full h-full overflow-hidden">
         <Image
           src={herobg}
@@ -163,17 +161,17 @@ const HeroSection: React.FC = () => {
         <div className="flex justify-center items-center md:gap-6 gap-3 mt-4 md:mt-6 lg:mt-4">
           <TypeAnimation
             sequence={[
-              'Conquer',
+              "Conquer",
               1200,
-              'Conquer • Build',
+              "Conquer • Build",
               1200,
-              'Conquer • Build • Trade On',
+              "Conquer • Build • Trade On",
               1800,
-              'Conquer • Build',
+              "Conquer • Build",
               1000,
-              'Conquer',
+              "Conquer",
               1000,
-              '',
+              "",
               500,
             ]}
             wrapper="span"
@@ -191,13 +189,13 @@ const HeroSection: React.FC = () => {
         <div className="w-full px-4 md:w-[70%] lg:w-[55%] text-center text-[#F0F7F7] -tracking-[2%]">
           <TypeAnimation
             sequence={[
-              'Roll the dice 🎲',
+              "Roll the dice 🎲",
               2000,
-              'Buy properties 🏠',
+              "Buy properties 🏠",
               2000,
-              'Collect rent 💰',
+              "Collect rent 💰",
               2000,
-              'Become the top tycoon 👑',
+              "Become the top tycoon 👑",
               2000,
             ]}
             wrapper="span"
@@ -206,17 +204,19 @@ const HeroSection: React.FC = () => {
             className="font-orbitron lg:text-[40px] md:text-[30px] text-[20px] font-[700] text-[#F0F7F7] text-center block"
           />
           <p className="font-dmSans font-[400] md:text-[18px] text-[14px] text-[#F0F7F7] mt-4">
-            Step into Blockopoly — the Web3 twist on the classic game of strategy, ownership, and fortune. Collect tokens, complete quests, and become the ultimate blockchain tycoon.
+            Step into Blockopoly — the Web3 twist on the classic game of
+            strategy, ownership, and fortune. Collect tokens, complete quests,
+            and become the ultimate blockchain tycoon.
           </p>
         </div>
-        <div className="w-full flex flex-col justify-center items-center mt-3 gap-3">
+        <div className="z-1 w-full flex flex-col justify-center items-center mt-3 gap-3">
           {address && !isUserRegistered && !loading && (
             <>
               <input
                 type="text"
                 name="name"
                 id="name"
-                value={gamerName}
+                value={username}
                 onChange={handleInputChange}
                 required
                 placeholder="input your name"
@@ -225,7 +225,7 @@ const HeroSection: React.FC = () => {
               <button
                 type="button"
                 className="relative group w-[260px] h-[52px] bg-transparent border-none p-0 overflow-hidden cursor-pointer"
-                disabled={loading || !gamerName.trim() || !address}
+                disabled={loading || !username.trim() || !address}
                 onClick={handleRequest}
               >
                 <svg
