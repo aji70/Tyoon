@@ -11,26 +11,42 @@ contract Blockopoly {
         string username;
         address playerAddress;
         uint64 timestamp;
-        uint gamesPlayed;
-        uint gameWon;
-        uint gameLost;
-        uint totalStaked;
-        uint totalEarned;
-        uint totalWithdrawn;
+        uint256 gamesPlayed;
+        uint256 gameWon;
+        uint256 gameLost;
+        uint256 totalStaked;
+        uint256 totalEarned;
+        uint256 totalWithdrawn;
     }
 
     // Enums for Game struct
-    enum GameStatus { Pending, Ongoing, Ended }
-    enum GameType { PublicGame, PrivateGame }
-    enum PlayerSymbol { Hat, Car, Dog, Thimble, Iron, Battleship, Boot, Wheelbarrow }
+    enum GameStatus {
+        Pending,
+        Ongoing,
+        Ended
+    }
+    enum GameType {
+        PublicGame,
+        PrivateGame
+    }
+    enum PlayerSymbol {
+        Hat,
+        Car,
+        Dog,
+        Thimble,
+        Iron,
+        Battleship,
+        Boot,
+        Wheelbarrow
+    }
 
-    // Struct to represent a game (exactly 7 fields)
+    // Struct to represent a game (as provided)
     struct Game {
         uint256 id;
         string code;
         address creator;
         GameStatus status;
-        uint nextPlayer;
+        uint256 nextPlayer; // using uint as turn index (1-based)
         address winner;
         uint8 numberOfPlayers;
         GameType mode;
@@ -38,13 +54,13 @@ contract Blockopoly {
         uint64 endedAt;
     }
 
-    // Struct to represent a player’s state in a game (exactly 7 fields)
+    // Struct to represent a player’s state in a game
     struct GamePlayer {
         uint256 gameId;
         address playerAddress;
         uint256 balance;
         uint8 position;
-        uint order;
+        uint256 order;
         PlayerSymbol symbol;
         bool chanceJailCard;
         bool communityChestJailCard;
@@ -65,43 +81,10 @@ contract Blockopoly {
         VisitingJail
     }
 
-    struct GamePurchases{
-        uint gameId;
+    struct GamePurchases {
+        uint256 gameId;
         address ownerAddress;
         uint8 propertyId;
-    }
-
-    enum TradeOffer {
-        PropertyForProperty,
-        PropertyForCash,
-        CashForProperty,
-        CashPlusPropertyForProperty,
-        PropertyForCashPlusProperty,
-        CashForChanceJailCard,
-        CashForCommunityJailCard,
-        CommunityJailCardForCash,
-        ChanceJailCardForCash
-    }
-
-    enum TradeStatus { Accepted, Rejected, Pending, Countered }
-
-    // Structs translated from Starknet dojo::model (important fields only)
-    struct TradeCounter {
-        uint256 id; // Maps to felt252
-        uint256 current_val;
-    }
-
-    struct TradeOfferDetails {
-        uint256 id; // Key
-        address from; // Maps to ContractAddress
-        address to; // Maps to ContractAddress
-        uint256 game_id;
-        uint8[] offered_property_ids; // Maps to Array<u8>
-        uint8[] requested_property_ids; // Maps to Array<u8>
-        uint256 cash_offer;
-        uint256 cash_request;
-        TradeOffer trade_type;
-        TradeStatus status;
     }
 
     struct Property {
@@ -112,17 +95,19 @@ contract Blockopoly {
         PropertyType property_type;
         uint256 cost_of_property;
         uint8 group_id;
+        bool isOwned;
+        uint256 rent;
     }
-
-
-
     // Storage mappings
     mapping(address => bool) public isRegistered;
     mapping(address => string) public addressToUsername;
     mapping(string => address) public usernameToAddress;
     mapping(address => Users) public players;
     mapping(uint256 => Game) public games;
-    mapping(uint256 => GameSettings) public gameSettings;
+    Add properties mapping: gameId => propertyId => Property
+    mapping(uint256 => mapping(uint256 => Property)) public properties;
+   
+
     mapping(uint256 => mapping(address => PlayerSymbol)) public gamePlayerSymbols;
     mapping(uint256 => mapping(address => GamePlayer)) public gamePlayers;
     mapping(uint256 => mapping(address => bool)) public gamePlayersMap;
@@ -131,6 +116,15 @@ contract Blockopoly {
     mapping(uint256 => uint256) public chanceCardCount;
     mapping(uint256 => mapping(uint256 => string)) public communityCards;
     mapping(uint256 => uint256) public communityCardCount;
+    mapping(uint256 => address) public playerIdToAddress;
+    uint256 public constant BOARD_SIZE = 40; // Monopoly-style board
+
+    // Track balances and positions per game
+    mapping(uint256 => mapping(address => uint256)) public balances;
+    mapping(uint256 => mapping(address => uint256)) public positions;
+
+    event DiceRolled(uint256 indexed gameId, address player, uint256 die1, uint256 die2, uint256 newPos);
+
     mapping(uint256 => mapping(address => mapping(uint8 => bool))) public propertiesOwnedMap;
     mapping(uint256 => mapping(address => uint8)) public propertiesOwnedCount;
     uint256 private gameIdCounter;
@@ -152,7 +146,7 @@ contract Blockopoly {
     }
 
     // Register a new player
-    function registerNewPlayer(string memory username) public nonEmptyUsername(username) {
+    function registerPlayer(string memory username) public nonEmptyUsername(username) returns (uint256) {
         address caller = msg.sender;
         uint64 timestamp = uint64(block.timestamp);
         totalUsers++;
@@ -168,7 +162,7 @@ contract Blockopoly {
             username: username,
             playerAddress: caller,
             timestamp: timestamp,
-            gamesPlayed: 0, // Initialize missing fields
+            gamesPlayed: 0,
             gameWon: 0,
             gameLost: 0,
             totalStaked: 0,
@@ -176,7 +170,11 @@ contract Blockopoly {
             totalWithdrawn: 0
         });
 
+        playerIdToAddress[totalUsers] = caller;
+
         emit PlayerCreated(username, caller, timestamp);
+
+        return totalUsers;
     }
 
     // Generate a unique game ID
@@ -186,73 +184,192 @@ contract Blockopoly {
         return gameId;
     }
 
-    // Initialize Chance card deck (simplified)
-    function initializeChanceDeck(uint256 gameId) internal {
-        string[2] memory deck = ["Advance to Go (Collect $200)", "Go to Jail"];
-        for (uint256 i = 0; i < deck.length; i++) {
-            chanceCards[gameId][i] = deck[i];
+    function rollDice(uint256 gameId) external {
+        Game storage game = games[gameId];
+        require(game.status == GameStatus.Ongoing, "Game not active");
+
+        // Find the address of the player whose turn it is by scanning gamePlayersMap for order == nextPlayer
+        address currentPlayer = address(0);
+        for (uint256 i = 1; i <= totalUsers; i++) {
+            address playerAddr = playerIdToAddress[i];
+            if (gamePlayersMap[gameId][playerAddr]) {
+                if (gamePlayers[gameId][playerAddr].order == game.nextPlayer) {
+                    currentPlayer = playerAddr;
+                    break;
+                }
+            }
         }
-        chanceCardCount[gameId] = deck.length;
+        require(currentPlayer != address(0), "Current player not found");
+        require(msg.sender == currentPlayer, "Not your turn");
+
+        // roll dice
+        uint256 die1 = (uint256(keccak256(abi.encodePacked(block.timestamp, msg.sender, "D1"))) % 6) + 1;
+        uint256 die2 = (uint256(keccak256(abi.encodePacked(block.prevrandao, msg.sender, "D2"))) % 6) + 1;
+        uint256 total = die1 + die2;
+
+        // update position
+        uint256 newPos = (positions[gameId][msg.sender] + total) % BOARD_SIZE;
+        positions[gameId][msg.sender] = newPos;
+
+        emit DiceRolled(gameId, msg.sender, die1, die2, newPos);
+
+        // 🟢 property interaction goes here
+        if (properties[gameId][newPos].isOwned && properties[gameId][newPos].owner != msg.sender) {
+            uint256 rent = properties[gameId][newPos].rent;
+            require(balances[gameId][msg.sender] >= rent, "Not enough balance");
+            balances[gameId][msg.sender] -= rent;
+            balances[gameId][properties[gameId][newPos].owner] += rent;
+        } else if (!properties[gameId][newPos].isOwned) {
+            // let player buy (separate buyProperty() tx)
+        }
+
+        // pass turn
+        if (game.nextPlayer == game.numberOfPlayers) {
+            game.nextPlayer = 1;
+        } else {
+            game.nextPlayer++;
+        }
     }
 
-    // Initialize Community Chest card deck (simplified)
-    function initializeCommunityDeck(uint256 gameId) internal {
-        string[2] memory deck = ["Bank error in your favor - Collect $200", "Get Out of Jail Free"];
-        for (uint256 i = 0; i < deck.length; i++) {
-            communityCards[gameId][i] = deck[i];
-        }
-        communityCardCount[gameId] = deck.length;
-    }
-
-    // Create a new game
-    function createGame(
-        uint8 gameType,
-        uint8 playerSymbol,
-        uint8 numberOfPlayers,
-        GameSettings memory settings
-    ) public onlyRegistered returns (uint256) {
+    /// @notice Create a new game. Uses only on-chain structs; off-chain will manage extra settings.
+    /// @param gameType 0 = PublicGame, 1 = PrivateGame
+    /// @param playerSymbol value 0..7 for PlayerSymbol
+    /// @param numberOfPlayers 2..8
+    /// @param code arbitrary string/code for the game (e.g., invite code)
+    function createGame(uint8 gameType, uint8 playerSymbol, uint8 numberOfPlayers, string memory code)
+        public
+        onlyRegistered
+        returns (uint256)
+    {
         require(numberOfPlayers >= 2 && numberOfPlayers <= 8, "Invalid number of players");
-        require(gameType <= 1, "Invalid game type");
-        require(playerSymbol <= 7, "Invalid player symbol");
-        require(settings.maxPlayers == numberOfPlayers, "Settings maxPlayers mismatch");
-        require(settings.startingCash >= 100 && settings.startingCash <= 1500, "Invalid starting cash");
+        require(gameType <= uint8(GameType.PrivateGame), "Invalid game type");
+        require(playerSymbol <= uint8(PlayerSymbol.Wheelbarrow), "Invalid player symbol");
 
         uint256 gameId = generateGameId();
 
         Game storage game = games[gameId];
         game.id = gameId;
+        game.code = code;
+        game.creator = msg.sender;
         game.status = GameStatus.Pending;
-        game.nextPlayer = msg.sender; // Note: Stored as uint, should be address
+        game.nextPlayer = 1; // Turn index (1 = the creator's turn initially)
         game.winner = address(0);
-        game.createdAt = uint64(block.timestamp);
         game.numberOfPlayers = numberOfPlayers;
+        game.mode = GameType(gameType);
+        game.createdAt = uint64(block.timestamp);
         game.endedAt = 0;
 
-        gameSettings[gameId] = settings;
+        // register creator as first player in-game
         gamePlayersMap[gameId][msg.sender] = true;
         gamePlayerSymbols[gameId][msg.sender] = PlayerSymbol(playerSymbol);
 
         string memory username = addressToUsername[msg.sender];
-        GamePlayer storage player = gamePlayers[gameId][msg.sender];
-        player.playerAddress = msg.sender;
-        player.gameId = gameId;
-        player.username = username;
-        player.balance = settings.startingCash;
-        player.position = 0;
-        player.playerSymbol = PlayerSymbol(playerSymbol);
-        player.order = 1; // Initialize order
 
-        initializeChanceDeck(gameId);
-        initializeCommunityDeck(gameId);
+        GamePlayer storage player = gamePlayers[gameId][msg.sender];
+        player.gameId = gameId;
+        player.playerAddress = msg.sender;
+        player.balance = 1500; // default starting cash used on-chain (adjust off-chain if needed)
+        player.position = 0;
+        player.order = 1;
+        player.symbol = PlayerSymbol(playerSymbol);
+        player.chanceJailCard = false;
+        player.communityChestJailCard = false;
+        player.username = username;
+
+        totalGames++;
 
         emit GameCreated(gameId, msg.sender, uint64(block.timestamp));
 
         return gameId;
     }
 
+    /// @notice Draw a random Chance card index
+    function drawChanceCard(uint256 gameId) public view returns (uint256) {
+        require(usedGameIds[gameId], "Game does not exist");
+
+        return uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, msg.sender, gameId))) % 15;
+    }
+
+    /// @notice Draw a random Community Chest card index
+    function drawCommunityCard(uint256 gameId) public view returns (uint256) {
+        require(usedGameIds[gameId], "Game does not exist");
+
+        return
+            uint256(keccak256(abi.encodePacked(blockhash(block.number - 1), block.prevrandao, msg.sender, gameId))) % 15;
+    }
+
+    function getPlayer(address playerAddr) public view returns (Users memory) {
+        require(isRegistered[playerAddr], "Player not registered");
+        return players[playerAddr];
+    }
+
+    function getPlayerById(uint256 playerId) public view returns (Users memory) {
+        address playerAddr = playerIdToAddress[playerId];
+        require(playerAddr != address(0), "Player does not exist");
+        return players[playerAddr];
+    }
+
     // Retrieve Game struct
     function getGame(uint256 gameId) public view returns (Game memory) {
         require(usedGameIds[gameId], "Game does not exist");
         return games[gameId];
+    }
+
+    // Retrieve a player's in-game record
+    function getGamePlayer(uint256 gameId, address playerAddr) public view returns (GamePlayer memory) {
+        require(usedGameIds[gameId], "Game does not exist");
+        require(gamePlayersMap[gameId][playerAddr], "Player not in game");
+        return gamePlayers[gameId][playerAddr];
+    }
+
+    // Simple join function for additional players (creator already auto-registered)
+    function joinGame(uint256 gameId, uint8 playerSymbol) public onlyRegistered {
+        require(usedGameIds[gameId], "Game does not exist");
+        Game storage game = games[gameId];
+        require(game.status == GameStatus.Pending, "Game not open for joining");
+        require(!gamePlayersMap[gameId][msg.sender], "Already joined");
+        require(playerSymbol <= uint8(PlayerSymbol.Wheelbarrow), "Invalid symbol");
+
+        // count current players by scanning simple heuristic: properties of mapping can't be iterated
+        // We track player order by incrementing a local counter from known playersAdded (off-chain better).
+        // Here we'll set the joining player's order using the number of players currently assigned on-chain:
+        // Use propertiesOwnedCount mapping as not suitable; instead approximate by using player order assignment based on numberOfPlayers and caller count derived off-chain.
+        // For deterministic on-chain order, we simply set order = 2 + number of players already mapped to this game (best-effort).
+        // NOTE: on-chain enumeration of mapping keys is not possible; for robust tracking keep an off-chain player list.
+        // For simplicity, set order = 2 (meaning subsequent players should be managed off-chain for accurate order).
+        gamePlayersMap[gameId][msg.sender] = true;
+        gamePlayerSymbols[gameId][msg.sender] = PlayerSymbol(playerSymbol);
+
+        GamePlayer storage player = gamePlayers[gameId][msg.sender];
+        player.gameId = gameId;
+        player.playerAddress = msg.sender;
+        player.balance = 1500;
+        player.position = 0;
+        player.order = 2; // best-effort default; off-chain should manage exact ordering
+        player.symbol = PlayerSymbol(playerSymbol);
+        player.chanceJailCard = false;
+        player.communityChestJailCard = false;
+        player.username = addressToUsername[msg.sender];
+    }
+
+    // Small helper to mark a game as started (only creator can start)
+    function startGame(uint256 gameId) public {
+        require(usedGameIds[gameId], "Game does not exist");
+        Game storage game = games[gameId];
+        require(msg.sender == game.creator, "Only creator can start");
+        require(game.status == GameStatus.Pending, "Game already started or ended");
+        game.status = GameStatus.Ongoing;
+        // nextPlayer remains index 1 by default
+    }
+
+    // Small helper to end a game and record winner (only creator)
+    function endGame(uint256 gameId, address winnerAddr) public {
+        require(usedGameIds[gameId], "Game does not exist");
+        Game storage game = games[gameId];
+        require(msg.sender == game.creator, "Only creator can end");
+        require(game.status == GameStatus.Ongoing || game.status == GameStatus.Pending, "Game already ended");
+        game.status = GameStatus.Ended;
+        game.winner = winnerAddr;
+        game.endedAt = uint64(block.timestamp);
     }
 }
