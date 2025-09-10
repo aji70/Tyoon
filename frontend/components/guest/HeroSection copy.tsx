@@ -1,42 +1,48 @@
-'use client';
-import React, { useEffect, useState } from 'react';
-import herobg from '@/public/heroBg.png';
-import Image from 'next/image';
-import { Dices, KeyRound } from 'lucide-react';
-import { TypeAnimation } from 'react-type-animation';
-import { useRouter } from 'next/navigation';
-import { useAccount } from 'wagmi';
-import { usePlayerContract } from '@/context/ContractProvider';
+"use client";
+import React, { useEffect, useState } from "react";
+import herobg from "@/public/heroBg.png";
+import Image from "next/image";
+import { Dices, KeyRound } from "lucide-react";
+import { TypeAnimation } from "react-type-animation";
+import { useRouter } from "next/navigation";
+import { useAccount } from "wagmi";
+import {
+  useIsRegistered,
+  useGetUsername,
+  usePlayerContract,
+} from "@/context/ContractProvider";
 
 const HeroSection: React.FC = () => {
   const router = useRouter();
   const { address, isConnecting } = useAccount();
-  const { useIsRegistered, useGetUsername, registerPlayer } = usePlayerContract();
+  const { registerPlayer } = usePlayerContract();
 
-  const [gamerName, setGamerName] = useState('');
+  const [gamerName, setGamerName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [registrationPending, setRegistrationPending] = useState(false);
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState("");
 
   const {
     data: isUserRegistered,
     isLoading: isRegisteredLoading,
     error: registeredError,
   } = useIsRegistered(address, { enabled: !!address });
-  const { data: fetchedUsername } = useGetUsername(address, { enabled: !!address });
+  const { data: fetchedUsername } = useGetUsername(address, {
+    enabled: !!address,
+  });
 
   useEffect(() => {
     if (registeredError) {
-      console.error('Registered error:', registeredError);
+      console.error("Registered error:", registeredError);
       const msg = registeredError?.message || String(registeredError);
       setError(msg);
     }
     if (isUserRegistered) {
-      setUsername(fetchedUsername || 'Unknown');
+      setUsername(fetchedUsername || "Unknown");
     } else {
-      setUsername('');
+      setUsername("");
     }
   }, [isUserRegistered, fetchedUsername, registeredError]);
 
@@ -44,35 +50,35 @@ const HeroSection: React.FC = () => {
     setGamerName(e.target.value);
   };
 
-  const handleRouteToPrivateRoom = () => router.push('/game-settings');
-  const handleRouteToJoinRoom = () => router.push('/join-room');
+  const handleRouteToPrivateRoom = () => router.push("/game-settings");
+  const handleRouteToJoinRoom = () => router.push("/join-room");
 
   const handleRequest = async () => {
     setError(null);
     setSuccess(null);
 
     if (!address) {
-      setError('Please connect your wallet');
+      setError("Please connect your wallet");
       return;
     }
     const name = gamerName.trim();
     if (!name) {
-      setError('Please enter a username');
+      setError("Please enter a username");
       return;
     }
 
-    console.log('Calling registerPlayer with:', { name });
+    console.log("Calling registerPlayer with:", { name });
     setLoading(true);
     setRegistrationPending(true);
 
     try {
       await registerPlayer(name);
-      setSuccess('Registration successful!');
-      setGamerName('');
+      setSuccess("Registration successful!");
+      setGamerName("");
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
-      console.error('Registration error:', err);
-      const msg = err?.message || 'Failed to register. Please try again.';
+      console.error("Registration error:", err);
+      const msg = err?.message || "Failed to register. Please try again.";
       setError(msg);
     } finally {
       setLoading(false);
@@ -83,7 +89,9 @@ const HeroSection: React.FC = () => {
   if (isConnecting) {
     return (
       <div className="w-full h-screen flex items-center justify-center">
-        <p className="font-orbitron text-[#00F0FF] text-[16px]">Connecting to wallet...</p>
+        <p className="font-orbitron text-[#00F0FF] text-[16px]">
+          Connecting to wallet...
+        </p>
       </div>
     );
   }
@@ -139,17 +147,17 @@ const HeroSection: React.FC = () => {
         <div className="flex justify-center items-center md:gap-6 gap-3 mt-4 md:mt-6 lg:mt-4">
           <TypeAnimation
             sequence={[
-              'Conquer',
+              "Conquer",
               1200,
-              'Conquer • Build',
+              "Conquer • Build",
               1200,
-              'Conquer • Build • Trade On',
+              "Conquer • Build • Trade On",
               1800,
-              'Conquer • Build',
+              "Conquer • Build",
               1000,
-              'Conquer',
+              "Conquer",
               1000,
-              '',
+              "",
               500,
             ]}
             wrapper="span"
@@ -171,13 +179,13 @@ const HeroSection: React.FC = () => {
         <div className="w-full px-4 md:w-[70%] lg:w-[55%] text-center text-[#F0F7F7] -tracking-[2%]">
           <TypeAnimation
             sequence={[
-              'Roll the dice 🎲',
+              "Roll the dice 🎲",
               2000,
-              'Buy properties 🏠',
+              "Buy properties 🏠",
               2000,
-              'Collect rent 💰',
+              "Collect rent 💰",
               2000,
-              'Become the top tycoon 👑',
+              "Become the top tycoon 👑",
               2000,
             ]}
             wrapper="span"
@@ -266,7 +274,9 @@ const HeroSection: React.FC = () => {
           )}
 
           {/* Errors & success */}
-          {error && <p className="text-red-400 text-sm text-center mt-2">{error}</p>}
+          {error && (
+            <p className="text-red-400 text-sm text-center mt-2">{error}</p>
+          )}
           {!registrationPending && !isUserRegistered && success && (
             <p className="text-green-400 text-sm text-center mt-2">{success}</p>
           )}

@@ -15,12 +15,15 @@ import { GiBank, GiPrisoner } from "react-icons/gi";
 import { IoBuild } from "react-icons/io5";
 import { FaHandHoldingDollar } from "react-icons/fa6";
 import { AiOutlineDollarCircle } from "react-icons/ai";
-import { FaRandom } from "react-icons/fa";
+import { FaRandom, FaUser } from "react-icons/fa";
 import { useRouter } from "next/navigation";
 import { useAccount } from "wagmi";
-import { usePlayerContract } from "@/context/ContractProvider";
 import { toast } from "react-toastify";
 import { generateGameCode } from "@/lib/utils/games";
+import { GamePieces } from "@/lib/constants/games";
+import { apiClient } from "@/lib/api";
+
+import { useIsRegistered, useCreateGame } from "@/context/ContractProvider";
 
 // Define settings interface
 interface Settings {
@@ -39,11 +42,10 @@ interface Settings {
 const GameSettings = () => {
   const router = useRouter();
   const { address } = useAccount();
-  const { useIsRegistered, useCreateGame } = usePlayerContract();
 
   const [settings, setSettings] = useState<Settings>({
     code: generateGameCode(),
-    symbol: "car",
+    symbol: "hat",
     maxPlayers: "2",
     privateRoom: false,
     auction: false,
@@ -59,8 +61,9 @@ const GameSettings = () => {
       enabled: !!address,
     });
 
-  const gameType = settings.privateRoom ? 1 : 0; // 0: PublicGame, 1: PrivateGame
-  const playerSymbol = 0; // Default to Hat
+  const gameType = settings.privateRoom ? "PRIVATE" : "PUBLIC"; // 0: PublicGame, 1: PrivateGame
+  const gameCode = settings.code; // Auto generated code
+  const playerSymbol = settings.symbol; // Default to Hat
   const numberOfPlayers = Number.parseInt(settings.maxPlayers, 10);
 
   const {
@@ -68,9 +71,9 @@ const GameSettings = () => {
     isPending,
     error: contractError,
     txHash,
-  } = useCreateGame(gameType, playerSymbol, numberOfPlayers, {
+  } = useCreateGame(gameCode, gameType, playerSymbol, numberOfPlayers, {
     maxPlayers: numberOfPlayers,
-    privateRoom: settings.privateRoom,
+    privateRoom: gameType,
     auction: settings.auction,
     rentInPrison: settings.rentInPrison,
     mortgage: settings.mortgage,
@@ -111,7 +114,7 @@ const GameSettings = () => {
     try {
       console.log("Calling createGame with settings:", settings); // Debug log
       const gameId = await createGame();
-      if (!gameId || gameId === 0n) {
+      if (!gameId) {
         throw new Error("Invalid game ID retrieved");
       }
 
@@ -122,6 +125,22 @@ const GameSettings = () => {
         "Transaction hash:",
         txHash
       ); // Debug log
+
+      const response = await apiClient.post("/games", {
+        code: gameCode,
+        mode: gameType,
+        address,
+        symbol: playerSymbol,
+        number_of_players: numberOfPlayers,
+        settings: {
+          auction: settings.auction,
+          rent_in_prison: settings.rentInPrison,
+          mortgage: settings.mortgage,
+          even_build: settings.evenBuild,
+          starting_cash: Number(settings.startingCash),
+          randomize_play_order: settings.randomPlayOrder,
+        },
+      });
 
       toast.update(toastId, {
         render: `Game created successfully! Starting game with ID: ${gameIdStr}`,
@@ -169,6 +188,36 @@ const GameSettings = () => {
 
         {/* First Setting */}
         <div className="w-full max-w-[792px] bg-[#010F10] rounded-[12px] border-[1px] border-[#003B3E] md:p-[40px] p-[20px] flex flex-col gap-4">
+          {/* Select Your Avatar */}
+          <div className="w-full flex justify-between items-center">
+            <div className="flex items-start md:gap-3 gap-2">
+              <FaUser className="md:w-6 md:h-6 w-5 h-5 mt-1.5 text-[#F0F7F7]" />
+              <div className="flex flex-col">
+                <h4 className="text-[#F0F7F7] md:text-[22px] text-[20px] font-dmSans font-[600]">
+                  Select Your Avatar
+                </h4>
+                <p className="text-[#455A64] font-[500] font-dmSans text-[16px]">
+                  Please choose your preferred avatar
+                </p>
+              </div>
+            </div>
+            <Select
+              onValueChange={(value) => handleSettingChange("symbol", value)}
+              defaultValue={settings.symbol}
+            >
+              <SelectTrigger className="w-[160px] data-[size=default]:h-[40px] text-[#73838B] border-[1px] border-[#263238]">
+                <SelectValue className="text-[#F0F7F7]" />
+              </SelectTrigger>
+              <SelectContent>
+                {GamePieces.map((piece) => (
+                  <SelectItem key={piece.id} value={piece.id}>
+                    {piece.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* Maximum Players */}
           <div className="w-full flex justify-between items-center">
             <div className="flex items-start md:gap-3 gap-2">

@@ -21,7 +21,6 @@ const gameController = {
         address,
         symbol,
         number_of_players,
-        status,
         settings,
       } = req.body;
       const user = await User.findByAddress(address);

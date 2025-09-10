@@ -6,7 +6,11 @@ import { Dices, KeyRound, Gamepad2 } from "lucide-react"; // Added Gamepad2 for 
 import { TypeAnimation } from "react-type-animation";
 import { useRouter } from "next/navigation";
 import { useAccount } from "wagmi";
-import { usePlayerContract } from "@/context/ContractProvider";
+import {
+  useIsRegistered,
+  useGetUsername,
+  usePlayerContract,
+} from "@/context/ContractProvider";
 import { toast } from "react-toastify";
 import { apiClient } from "@/lib/api";
 import { User } from "@/lib/types/users";
@@ -14,8 +18,7 @@ import { User } from "@/lib/types/users";
 const HeroSection: React.FC = () => {
   const router = useRouter();
   const { address, isConnecting } = useAccount();
-  const { useIsRegistered, useGetUsername, registerPlayer } =
-    usePlayerContract();
+  const { registerPlayer } = usePlayerContract();
   const [loading, setLoading] = useState(false);
   const [username, setUsername] = useState("");
 
