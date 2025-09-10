@@ -1,28 +1,31 @@
-'use client';
-import React, { useState } from 'react';
-import { FaUsers } from 'react-icons/fa6';
+"use client";
+import React, { useState } from "react";
+import { FaUsers } from "react-icons/fa6";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Switch } from '@/components/ui/game-switch';
-import { MdPrivateConnectivity } from 'react-icons/md';
-import { RiAuctionFill } from 'react-icons/ri';
-import { GiBank, GiPrisoner } from 'react-icons/gi';
-import { IoBuild } from 'react-icons/io5';
-import { FaHandHoldingDollar } from 'react-icons/fa6';
-import { AiOutlineDollarCircle } from 'react-icons/ai';
-import { FaRandom } from 'react-icons/fa';
-import { useRouter } from 'next/navigation';
-import { useAccount } from 'wagmi';
-import { usePlayerContract } from '@/context/ContractProvider';
-import { toast } from 'react-toastify';
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/game-switch";
+import { MdPrivateConnectivity } from "react-icons/md";
+import { RiAuctionFill } from "react-icons/ri";
+import { GiBank, GiPrisoner } from "react-icons/gi";
+import { IoBuild } from "react-icons/io5";
+import { FaHandHoldingDollar } from "react-icons/fa6";
+import { AiOutlineDollarCircle } from "react-icons/ai";
+import { FaRandom } from "react-icons/fa";
+import { useRouter } from "next/navigation";
+import { useAccount } from "wagmi";
+import { usePlayerContract } from "@/context/ContractProvider";
+import { toast } from "react-toastify";
+import { generateGameCode } from "@/lib/utils/games";
 
 // Define settings interface
 interface Settings {
+  code: string;
+  symbol: string;
   maxPlayers: string;
   privateRoom: boolean;
   auction: boolean;
@@ -39,88 +42,102 @@ const GameSettings = () => {
   const { useIsRegistered, useCreateGame } = usePlayerContract();
 
   const [settings, setSettings] = useState<Settings>({
-    maxPlayers: '2',
+    code: generateGameCode(),
+    symbol: "car",
+    maxPlayers: "2",
     privateRoom: false,
     auction: false,
     rentInPrison: false,
     mortgage: false,
     evenBuild: false,
-    startingCash: '100',
+    startingCash: "100",
     randomPlayOrder: false,
   });
 
-  const { data: isUserRegistered, isLoading: isRegisteredLoading } = useIsRegistered(address, {
-    enabled: !!address,
-  });
+  const { data: isUserRegistered, isLoading: isRegisteredLoading } =
+    useIsRegistered(address, {
+      enabled: !!address,
+    });
 
   const gameType = settings.privateRoom ? 1 : 0; // 0: PublicGame, 1: PrivateGame
   const playerSymbol = 0; // Default to Hat
-  const numberOfPlayers = parseInt(settings.maxPlayers, 10);
+  const numberOfPlayers = Number.parseInt(settings.maxPlayers, 10);
 
-  const { write: createGame, isPending, error: contractError, txHash } = useCreateGame(
-    gameType,
-    playerSymbol,
-    numberOfPlayers,
-    {
-      maxPlayers: numberOfPlayers,
-      privateRoom: settings.privateRoom,
-      auction: settings.auction,
-      rentInPrison: settings.rentInPrison,
-      mortgage: settings.mortgage,
-      evenBuild: settings.evenBuild,
-      startingCash: BigInt(settings.startingCash),
-      randomizePlayOrder: settings.randomPlayOrder,
-    }
-  );
+  const {
+    write: createGame,
+    isPending,
+    error: contractError,
+    txHash,
+  } = useCreateGame(gameType, playerSymbol, numberOfPlayers, {
+    maxPlayers: numberOfPlayers,
+    privateRoom: settings.privateRoom,
+    auction: settings.auction,
+    rentInPrison: settings.rentInPrison,
+    mortgage: settings.mortgage,
+    evenBuild: settings.evenBuild,
+    startingCash: BigInt(settings.startingCash),
+    randomizePlayOrder: settings.randomPlayOrder,
+  });
 
-  const handleSettingChange = (key: keyof Settings, value: string | boolean) => {
+  const handleSettingChange = (
+    key: keyof Settings,
+    value: string | boolean
+  ) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
   const handlePlay = async () => {
     if (!address) {
-      toast.error('Please connect your wallet', {
-        position: 'top-right',
+      toast.error("Please connect your wallet", {
+        position: "top-right",
         autoClose: 5000,
       });
       return;
     }
 
     if (!isUserRegistered) {
-      toast.error('Please register before creating a game', {
-        position: 'top-right',
+      toast.error("Please register before creating a game", {
+        position: "top-right",
         autoClose: 5000,
       });
-      router.push('/');
+      router.push("/");
       return;
     }
 
-    const toastId = toast.loading('Creating game...', {
-      position: 'top-right',
+    const toastId = toast.loading("Creating game...", {
+      position: "top-right",
     });
 
     try {
-      console.log('Calling createGame with settings:', settings); // Debug log
+      console.log("Calling createGame with settings:", settings); // Debug log
       const gameId = await createGame();
       if (!gameId || gameId === 0n) {
-        throw new Error('Invalid game ID retrieved');
+        throw new Error("Invalid game ID retrieved");
       }
 
       const gameIdStr = gameId.toString(); // Convert bigint to string for URL
-      console.log('Game created with ID:', gameIdStr, 'Transaction hash:', txHash); // Debug log
+      console.log(
+        "Game created with ID:",
+        gameIdStr,
+        "Transaction hash:",
+        txHash
+      ); // Debug log
 
       toast.update(toastId, {
         render: `Game created successfully! Starting game with ID: ${gameIdStr}`,
-        type: 'success',
+        type: "success",
         isLoading: false,
         autoClose: 3000,
         onClose: () => router.push(`/game-room-loading?gameId=${gameIdStr}`),
       });
     } catch (err: any) {
-      console.error('Error creating game:', err, 'Transaction hash:', txHash);
+      console.error("Error creating game:", err, "Transaction hash:", txHash);
       toast.update(toastId, {
-        render: contractError?.message || err.message || 'Failed to create game. Please try again.',
-        type: 'error',
+        render:
+          contractError?.message ||
+          err.message ||
+          "Failed to create game. Please try again.",
+        type: "error",
         isLoading: false,
         autoClose: 5000,
       });
@@ -130,7 +147,9 @@ const GameSettings = () => {
   if (isRegisteredLoading) {
     return (
       <div className="w-full h-screen flex items-center justify-center">
-        <p className="font-orbitron text-[#00F0FF] text-[16px]">Checking registration status...</p>
+        <p className="font-orbitron text-[#00F0FF] text-[16px]">
+          Checking registration status...
+        </p>
       </div>
     );
   }
@@ -143,7 +162,8 @@ const GameSettings = () => {
             Game Settings
           </h2>
           <p className="text-[#869298] text-[16px] font-dmSans text-center">
-            Since you&apos;re creating a private game room, you get to choose how you want your game to go
+            Since you&apos;re creating a private game room, you get to choose
+            how you want your game to go
           </p>
         </div>
 
@@ -163,7 +183,9 @@ const GameSettings = () => {
               </div>
             </div>
             <Select
-              onValueChange={(value) => handleSettingChange('maxPlayers', value)}
+              onValueChange={(value) =>
+                handleSettingChange("maxPlayers", value)
+              }
               defaultValue={settings.maxPlayers}
             >
               <SelectTrigger className="w-[80px] data-[size=default]:h-[40px] text-[#73838B] border-[1px] border-[#263238]">
@@ -197,7 +219,9 @@ const GameSettings = () => {
             <Switch
               id="private-room"
               checked={settings.privateRoom}
-              onCheckedChange={(checked) => handleSettingChange('privateRoom', checked)}
+              onCheckedChange={(checked) =>
+                handleSettingChange("privateRoom", checked)
+              }
             />
           </div>
         </div>
@@ -222,14 +246,17 @@ const GameSettings = () => {
                   Auction
                 </h4>
                 <p className="text-[#455A64] font-[500] font-dmSans text-[16px]">
-                  If someone skips purchasing a property during auction, it will be sold to the highest bidder.
+                  If someone skips purchasing a property during auction, it will
+                  be sold to the highest bidder.
                 </p>
               </div>
             </div>
             <Switch
               id="auction"
               checked={settings.auction}
-              onCheckedChange={(checked) => handleSettingChange('auction', checked)}
+              onCheckedChange={(checked) =>
+                handleSettingChange("auction", checked)
+              }
             />
           </div>
 
@@ -242,14 +269,17 @@ const GameSettings = () => {
                   Rent In Prison
                 </h4>
                 <p className="text-[#455A64] font-[500] font-dmSans text-[16px]">
-                  Rent will be collected when landing on properties of a player in prison.
+                  Rent will be collected when landing on properties of a player
+                  in prison.
                 </p>
               </div>
             </div>
             <Switch
               id="rent-in-prison"
               checked={settings.rentInPrison}
-              onCheckedChange={(checked) => handleSettingChange('rentInPrison', checked)}
+              onCheckedChange={(checked) =>
+                handleSettingChange("rentInPrison", checked)
+              }
             />
           </div>
 
@@ -262,14 +292,17 @@ const GameSettings = () => {
                   Mortgage
                 </h4>
                 <p className="text-[#455A64] font-[500] font-dmSans text-[16px]">
-                  Mortgage properties to earn 50% of their cost, but you won&apos;t get paid rent when players land on them.
+                  Mortgage properties to earn 50% of their cost, but you
+                  won&apos;t get paid rent when players land on them.
                 </p>
               </div>
             </div>
             <Switch
               id="mortgage"
               checked={settings.mortgage}
-              onCheckedChange={(checked) => handleSettingChange('mortgage', checked)}
+              onCheckedChange={(checked) =>
+                handleSettingChange("mortgage", checked)
+              }
             />
           </div>
 
@@ -282,14 +315,17 @@ const GameSettings = () => {
                   Even Build
                 </h4>
                 <p className="text-[#455A64] font-[500] font-dmSans text-[16px]">
-                  Houses and hotels must be built up and sold off evenly within a property set.
+                  Houses and hotels must be built up and sold off evenly within
+                  a property set.
                 </p>
               </div>
             </div>
             <Switch
               id="even-build"
               checked={settings.evenBuild}
-              onCheckedChange={(checked) => handleSettingChange('evenBuild', checked)}
+              onCheckedChange={(checked) =>
+                handleSettingChange("evenBuild", checked)
+              }
             />
           </div>
 
@@ -307,7 +343,9 @@ const GameSettings = () => {
               </div>
             </div>
             <Select
-              onValueChange={(value) => handleSettingChange('startingCash', value)}
+              onValueChange={(value) =>
+                handleSettingChange("startingCash", value)
+              }
               defaultValue={settings.startingCash}
             >
               <SelectTrigger className="w-[120px] data-[size=default]:h-[40px] text-[#73838B] border-[1px] border-[#263238]">
@@ -342,7 +380,9 @@ const GameSettings = () => {
             <Switch
               id="random-play"
               checked={settings.randomPlayOrder}
-              onCheckedChange={(checked) => handleSettingChange('randomPlayOrder', checked)}
+              onCheckedChange={(checked) =>
+                handleSettingChange("randomPlayOrder", checked)
+              }
             />
           </div>
         </div>
@@ -370,7 +410,7 @@ const GameSettings = () => {
               />
             </svg>
             <span className="absolute inset-0 flex items-center justify-center text-[#010F10] text-[18px] -tracking-[2%] font-orbitron font-[700] z-10">
-              {isPending ? 'Creating...' : 'Play'}
+              {isPending ? "Creating..." : "Play"}
             </span>
           </button>
         </div>

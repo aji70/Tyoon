@@ -18,23 +18,23 @@ const gameController = {
       const {
         code,
         mode,
-        user_id,
+        address,
         symbol,
         number_of_players,
         status,
         settings,
       } = req.body;
-      const user = await User.findById(user_id);
+      const user = await User.findByAddress(address);
       if (!user) {
         return res.status(422).json({ message: "User not found" });
       }
       const game = await Game.create({
         code,
-        mode,
+        mode: mode ? "PRIVATE" : "PUBLIC",
         creator_id: user.id,
         next_player_id: user.id,
         number_of_players,
-        status,
+        status: "PENDING",
       });
 
       const gameSettingsPayload = {
