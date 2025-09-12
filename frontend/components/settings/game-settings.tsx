@@ -1,29 +1,29 @@
-"use client";
-import React, { useState } from "react";
-import { FaUsers } from "react-icons/fa6";
+'use client';
+import React, { useState } from 'react';
+import { FaUsers, FaUser } from 'react-icons/fa6';
+import { House } from 'lucide-react'; // Import House icon for the button
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/game-switch";
-import { MdPrivateConnectivity } from "react-icons/md";
-import { RiAuctionFill } from "react-icons/ri";
-import { GiBank, GiPrisoner } from "react-icons/gi";
-import { IoBuild } from "react-icons/io5";
-import { FaHandHoldingDollar } from "react-icons/fa6";
-import { AiOutlineDollarCircle } from "react-icons/ai";
-import { FaRandom, FaUser } from "react-icons/fa";
-import { useRouter } from "next/navigation";
-import { useAccount } from "wagmi";
-import { toast } from "react-toastify";
-import { generateGameCode } from "@/lib/utils/games";
-import { GamePieces } from "@/lib/constants/games";
-import { apiClient } from "@/lib/api";
-
-import { useIsRegistered, useCreateGame } from "@/context/ContractProvider";
+} from '@/components/ui/select';
+import { Switch } from '@/components/ui/game-switch';
+import { MdPrivateConnectivity } from 'react-icons/md';
+import { RiAuctionFill } from 'react-icons/ri';
+import { GiBank, GiPrisoner } from 'react-icons/gi';
+import { IoBuild } from 'react-icons/io5';
+import { FaHandHoldingDollar } from 'react-icons/fa6';
+import { AiOutlineDollarCircle } from 'react-icons/ai';
+import { FaRandom } from 'react-icons/fa';
+import { useRouter } from 'next/navigation';
+import { useAccount } from 'wagmi';
+import { toast } from 'react-toastify';
+import { generateGameCode } from '@/lib/utils/games';
+import { GamePieces } from '@/lib/constants/games';
+import { apiClient } from '@/lib/api';
+import { useIsRegistered, useCreateGame } from '@/context/ContractProvider';
 
 // Define settings interface
 interface Settings {
@@ -42,17 +42,16 @@ interface Settings {
 const GameSettings = () => {
   const router = useRouter();
   const { address } = useAccount();
-
   const [settings, setSettings] = useState<Settings>({
     code: generateGameCode(),
-    symbol: "hat",
-    maxPlayers: "2",
+    symbol: 'hat',
+    maxPlayers: '2',
     privateRoom: false,
     auction: false,
     rentInPrison: false,
     mortgage: false,
     evenBuild: false,
-    startingCash: "100",
+    startingCash: '100',
     randomPlayOrder: false,
   });
 
@@ -61,16 +60,15 @@ const GameSettings = () => {
       enabled: !!address,
     });
 
-  const gameType = settings.privateRoom ? "PRIVATE" : "PUBLIC"; // 0: PublicGame, 1: PrivateGame
-  const gameCode = settings.code; // Auto generated code
-  const playerSymbol = settings.symbol; // Default to Hat
+  const gameType = settings.privateRoom ? 'PRIVATE' : 'PUBLIC';
+  const gameCode = settings.code;
+  const playerSymbol = settings.symbol;
   const numberOfPlayers = Number.parseInt(settings.maxPlayers, 10);
 
   const {
     write: createGame,
     isPending,
     error: contractError,
-    txHash,
   } = useCreateGame(gameCode, gameType, playerSymbol, numberOfPlayers, {
     maxPlayers: numberOfPlayers,
     privateRoom: gameType,
@@ -82,51 +80,42 @@ const GameSettings = () => {
     randomizePlayOrder: settings.randomPlayOrder,
   });
 
-  const handleSettingChange = (
-    key: keyof Settings,
-    value: string | boolean
-  ) => {
+  const handleSettingChange = (key: keyof Settings, value: string | boolean) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
   const handlePlay = async () => {
     if (!address) {
-      toast.error("Please connect your wallet", {
-        position: "top-right",
+      toast.error('Please connect your wallet', {
+        position: 'top-right',
         autoClose: 5000,
       });
       return;
     }
 
     if (!isUserRegistered) {
-      toast.error("Please register before creating a game", {
-        position: "top-right",
+      toast.error('Please register before creating a game', {
+        position: 'top-right',
         autoClose: 5000,
       });
-      router.push("/");
+      router.push('/');
       return;
     }
 
-    const toastId = toast.loading("Creating game...", {
-      position: "top-right",
+    const toastId = toast.loading('Creating game...', {
+      position: 'top-right',
     });
 
     try {
-      console.log("Calling createGame with settings:", settings); // Debug log
+      console.log('Calling createGame with settings:', settings);
       const gameId = await createGame();
       if (!gameId) {
-        throw new Error("Invalid game ID retrieved");
+        throw new Error('Invalid game ID retrieved');
       }
+      const gameIdStr = gameId.toString();
+      console.log('Game created with ID:', gameIdStr);
 
-      const gameIdStr = gameId.toString(); // Convert bigint to string for URL
-      console.log(
-        "Game created with ID:",
-        gameIdStr,
-        "Transaction hash:",
-        txHash
-      ); // Debug log
-
-      const response = await apiClient.post("/games", {
+      const response = await apiClient.post('/games', {
         code: gameCode,
         mode: gameType,
         address,
@@ -143,20 +132,22 @@ const GameSettings = () => {
       });
 
       toast.update(toastId, {
-        render: `Game created successfully! Starting game with ID: ${gameIdStr}`,
-        type: "success",
+        render: `Game created! Code: ${gameCode}`,
+        type: 'success',
         isLoading: false,
         autoClose: 3000,
-        onClose: () => router.push(`/game-room-loading?gameId=${gameIdStr}`),
+        onClose: () => {
+          setTimeout(() => router.push(`/game-waiting?gameCode=${gameCode}`), 100);
+        },
       });
     } catch (err: any) {
-      console.error("Error creating game:", err, "Transaction hash:", txHash);
+      console.error('Error creating game:', err);
       toast.update(toastId, {
         render:
           contractError?.message ||
           err.message ||
-          "Failed to create game. Please try again.",
-        type: "error",
+          'Failed to create game. Please try again.',
+        type: 'error',
         isLoading: false,
         autoClose: 5000,
       });
@@ -176,6 +167,36 @@ const GameSettings = () => {
   return (
     <section className="w-full min-h-screen bg-settings bg-cover bg-fixed bg-center">
       <main className="w-full h-auto py-20 flex flex-col items-center justify-start bg-[#010F101F] backdrop-blur-[12px] px-4">
+        {/* Go Back to Home Button */}
+        <div className="w-full max-w-[792px] flex justify-start mb-6">
+          <button
+            type="button"
+            onClick={() => router.push('/')}
+            className="relative group w-[227px] h-[40px] bg-transparent border-none p-0 overflow-hidden cursor-pointer"
+          >
+            <svg
+              width="227"
+              height="40"
+              viewBox="0 0 227 40"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              className="absolute top-0 left-0 w-full h-full"
+            >
+              <path
+                d="M6 1H221C225.373 1 227.996 5.85486 225.601 9.5127L207.167 37.5127C206.151 39.0646 204.42 40 202.565 40H6C2.96244 40 0.5 37.5376 0.5 34.5V6.5C0.5 3.46243 2.96243 1 6 1Z"
+                fill="#0E1415"
+                stroke="#003B3E"
+                strokeWidth={1}
+                className="group-hover:stroke-[#00F0FF] transition-all duration-300 ease-in-out"
+              />
+            </svg>
+            <span className="absolute inset-0 flex items-center justify-center text-[#0FF0FC] capitalize text-[13px] font-dmSans font-medium z-10">
+              <House className="mr-1 w-[14px] h-[14px]" />
+              Go Back Home
+            </span>
+          </button>
+        </div>
+
         <div className="w-full flex flex-col items-center mb-4">
           <h2 className="text-[#F0F7F7] font-orbitron md:text-[24px] text-[20px] font-[700] text-center">
             Game Settings
@@ -202,7 +223,7 @@ const GameSettings = () => {
               </div>
             </div>
             <Select
-              onValueChange={(value) => handleSettingChange("symbol", value)}
+              onValueChange={(value) => handleSettingChange('symbol', value)}
               defaultValue={settings.symbol}
             >
               <SelectTrigger className="w-[160px] data-[size=default]:h-[40px] text-[#73838B] border-[1px] border-[#263238]">
@@ -232,9 +253,7 @@ const GameSettings = () => {
               </div>
             </div>
             <Select
-              onValueChange={(value) =>
-                handleSettingChange("maxPlayers", value)
-              }
+              onValueChange={(value) => handleSettingChange('maxPlayers', value)}
               defaultValue={settings.maxPlayers}
             >
               <SelectTrigger className="w-[80px] data-[size=default]:h-[40px] text-[#73838B] border-[1px] border-[#263238]">
@@ -268,9 +287,7 @@ const GameSettings = () => {
             <Switch
               id="private-room"
               checked={settings.privateRoom}
-              onCheckedChange={(checked) =>
-                handleSettingChange("privateRoom", checked)
-              }
+              onCheckedChange={(checked) => handleSettingChange('privateRoom', checked)}
             />
           </div>
         </div>
@@ -303,9 +320,7 @@ const GameSettings = () => {
             <Switch
               id="auction"
               checked={settings.auction}
-              onCheckedChange={(checked) =>
-                handleSettingChange("auction", checked)
-              }
+              onCheckedChange={(checked) => handleSettingChange('auction', checked)}
             />
           </div>
 
@@ -326,9 +341,7 @@ const GameSettings = () => {
             <Switch
               id="rent-in-prison"
               checked={settings.rentInPrison}
-              onCheckedChange={(checked) =>
-                handleSettingChange("rentInPrison", checked)
-              }
+              onCheckedChange={(checked) => handleSettingChange('rentInPrison', checked)}
             />
           </div>
 
@@ -349,9 +362,7 @@ const GameSettings = () => {
             <Switch
               id="mortgage"
               checked={settings.mortgage}
-              onCheckedChange={(checked) =>
-                handleSettingChange("mortgage", checked)
-              }
+              onCheckedChange={(checked) => handleSettingChange('mortgage', checked)}
             />
           </div>
 
@@ -372,9 +383,7 @@ const GameSettings = () => {
             <Switch
               id="even-build"
               checked={settings.evenBuild}
-              onCheckedChange={(checked) =>
-                handleSettingChange("evenBuild", checked)
-              }
+              onCheckedChange={(checked) => handleSettingChange('evenBuild', checked)}
             />
           </div>
 
@@ -392,9 +401,7 @@ const GameSettings = () => {
               </div>
             </div>
             <Select
-              onValueChange={(value) =>
-                handleSettingChange("startingCash", value)
-              }
+              onValueChange={(value) => handleSettingChange('startingCash', value)}
               defaultValue={settings.startingCash}
             >
               <SelectTrigger className="w-[120px] data-[size=default]:h-[40px] text-[#73838B] border-[1px] border-[#263238]">
@@ -429,9 +436,7 @@ const GameSettings = () => {
             <Switch
               id="random-play"
               checked={settings.randomPlayOrder}
-              onCheckedChange={(checked) =>
-                handleSettingChange("randomPlayOrder", checked)
-              }
+              onCheckedChange={(checked) => handleSettingChange('randomPlayOrder', checked)}
             />
           </div>
         </div>
@@ -459,7 +464,7 @@ const GameSettings = () => {
               />
             </svg>
             <span className="absolute inset-0 flex items-center justify-center text-[#010F10] text-[18px] -tracking-[2%] font-orbitron font-[700] z-10">
-              {isPending ? "Creating..." : "Play"}
+              {isPending ? 'Creating...' : 'Play'}
             </span>
           </button>
         </div>
