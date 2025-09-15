@@ -11,7 +11,7 @@ import { Address } from "viem";
 import PlayerABI from "./abi.json";
 
 const CONTRACT_ADDRESS =
-  "0x2D526d050199b26cd0d7500FbBb7511E4285EF6f" as Address;
+  "0x44a672F52feEfbdED65492d2793982dcAB22f0e5" as Address;
 
 /* ----------------------- Types ----------------------- */
 type PlayerData = {
@@ -106,10 +106,10 @@ export function useRetrievePlayer(
 }
 
 export function useCreateGame(
-  gameCode: string,
   gameType: string,
   playerSymbol: string,
   numberOfPlayers: number,
+  gameCode: string,
   settings: GameSettings
 ) {
   const {
@@ -125,26 +125,41 @@ export function useCreateGame(
       address: CONTRACT_ADDRESS,
       abi: PlayerABI,
       functionName: "createGame",
-      args: [
-        gameType,
-        playerSymbol,
-        numberOfPlayers,
-        [
-          settings.maxPlayers,
-          settings.privateRoom,
-          settings.auction,
-          settings.rentInPrison,
-          settings.mortgage,
-          settings.evenBuild,
-          settings.startingCash,
-          settings.randomizePlayOrder,
-        ],
-      ],
+      args: [gameType, playerSymbol, numberOfPlayers, gameCode, settings.startingCash],
+     
     });
 
     if (!result) throw new Error("Invalid game ID returned from contract");
     return result as string;
   }, [writeContractAsync, gameType, playerSymbol, numberOfPlayers, settings]);
+
+  return { write, isPending, error, txHash, isSuccess };
+}
+
+export function useJoinGame(
+  gameId: number,
+  playerSymbol: string,
+) {
+  const {
+    writeContractAsync,
+    isPending,
+    error,
+    data: txHash,
+  } = useWriteContract();
+  const { isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+
+  const write = useCallback(async (): Promise<string> => {
+    const result = await writeContractAsync({
+      address: CONTRACT_ADDRESS,
+      abi: PlayerABI,
+      functionName: "joinGame",
+      args: [gameId, playerSymbol],
+     
+    });
+
+    if (!result) throw new Error("Invalid game ID returned from contract");
+    return result as string;
+  }, [writeContractAsync, gameId, playerSymbol]);
 
   return { write, isPending, error, txHash, isSuccess };
 }

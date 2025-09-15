@@ -4,7 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { PiTelegramLogoLight } from 'react-icons/pi';
 import { FaXTwitter } from 'react-icons/fa6';
-import { IoCopyOutline } from 'react-icons/io5';
+import { IoCopyOutline, IoHomeOutline } from 'react-icons/io5';
+import { useJoinGame } from '@/context/ContractProvider';
 
 interface Token {
   name: string;
@@ -14,6 +15,7 @@ interface Token {
 
 interface GameState {
   gameId: number;
+  code: string;
   maxPlayers: number;
   playersJoined: number;
   players: Array<{ id: string; symbol: string; name: string }>;
@@ -32,34 +34,9 @@ const tokens: Token[] = [
   { name: 'Wheelbarrow', emoji: '🛒', value: 7 },
 ];
 
-// Mock game lookup: In real app, fetch from API e.g., `/api/games?code=${gameCode}`
-const mockGameLookup = (gameCode: string): GameState | null => {
-  // Simulate: Map code to gameId and initial state (creator pre-joined)
-  const gameId = parseInt(gameCode.replace(/\D/g, '')) || 12345; // Fallback
-  return {
-    gameId,
-    maxPlayers: 4,
-    playersJoined: 1, // Start with creator
-    players: [{ id: 'creator', symbol: '0', name: 'Creator' }],
-    isReady: false,
-    availableSymbols: tokens.map((t) => ({ value: t.value.toString(), label: `${t.emoji} ${t.name}` })).slice(1), // Creator takes first
-  };
-};
 
-// Simulate real-time updates (e.g., other players joining). In real app, use WebSockets or polling.
-const simulateUpdates = (setGameState: React.Dispatch<React.SetStateAction<GameState | null>>) => {
-  const interval = setInterval(() => {
-    setGameState((prev) => {
-      if (!prev || prev.isReady) return prev;
-      const newJoined = Math.min(prev.playersJoined + Math.floor(Math.random() * 2), prev.maxPlayers);
-      if (newJoined === prev.maxPlayers) {
-        return { ...prev, playersJoined: newJoined, isReady: true };
-      }
-      return { ...prev, playersJoined: newJoined };
-    });
-  }, 5000); // Update every 5s
-  return () => clearInterval(interval);
-};
+=
+
 
 const GameWaiting = () => {
   const router = useRouter();
@@ -79,19 +56,43 @@ const GameWaiting = () => {
       return;
     }
 
-    // Mock lookup
-    const fetchedState = mockGameLookup(gameCode);
-    if (!fetchedState) {
-      setError('Invalid game code. Please check and try again.');
-      setLoading(false);
-      return;
-    }
-    setGameState(fetchedState);
-    setLoading(false);
+    const fetchGameState = async () => {
+      try {
+        const response = await fetch(`https://base-monopoly-production.up.railway.app/api/games/code/${gameCode}`);
+        if (!response.ok) {
+          throw new Error(`Game ${gameCode} not found: ${response.status} ${response.statusText}`);
+        }
+        const gameData = await response.json();
+        if (gameData.status !== 'PENDING') {
+          throw new Error(`Game ${gameCode} has already started or ended.`);
+        }
 
-    // Start simulation
-    const cleanup = simulateUpdates(setGameState);
-    return cleanup;
+        // Map API response to GameState format
+        const fetchedState: GameState = {
+          gameId: gameData.id,
+          code: gameData.code,
+          maxPlayers: gameData.number_of_players,
+          playersJoined: gameData.players_joined || 1,
+          players: gameData.players || [{ id: 'creator', symbol: '0', name: 'Creator' }], // Adjust based on API response
+          isReady: gameData.status === 'PENDING' && gameData.players_joined >= gameData.number_of_players,
+          availableSymbols: tokens
+            .filter((t) => !gameData.players?.some((p: any) => p.symbol === t.value.toString()))
+            .map((t) => ({ value: t.value.toString(), label: `${t.emoji} ${t.name}` })),
+        };
+        setGameState(fetchedState);
+      } catch (err: any) {
+        console.error('Error fetching game state:', err);
+        setError(err.message || 'Failed to fetch game data. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchGameState();
+
+    // Polling for real-time updates (replace with WebSocket if available)
+    const interval = setInterval(fetchGameState, 5000); // Poll every 5 seconds
+    return () => clearInterval(interval);
   }, [gameCode]);
 
   // Auto-redirect when ready and joined
@@ -104,12 +105,12 @@ const GameWaiting = () => {
     }
   }, [gameState?.isReady, isJoined, gameState?.gameId, router]);
 
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : 'https://blockopoly-mono-repo-g8ew.vercel.app');
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : 'https://base-monopoly-production.up.railway.app');
   const gameUrl = `${baseUrl}/game-waiting?gameCode=${gameCode}`;
   const shareText = `Join my Blockopoly game! Code: ${gameCode}. Waiting room: ${gameUrl}`;
   const telegramShareUrl = `https://t.me/share/url?url=${encodeURIComponent(gameUrl)}&text=${encodeURIComponent(shareText)}`;
   const twitterShareUrl = `https://x.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
-
+  console.log("Game Code:", gameCode);
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(gameUrl);
@@ -120,7 +121,7 @@ const GameWaiting = () => {
     }
   };
 
-  const handleJoinGame = () => {
+  const handleJoinGame = async () => {
     if (!playerSymbol || !gameState?.availableSymbols.some((s) => s.value === playerSymbol)) {
       setError('Please select a valid symbol.');
       return;
@@ -129,36 +130,64 @@ const GameWaiting = () => {
       setError('Game is full!');
       return;
     }
-    // Simulate join: Update state
-    setGameState((prev) => {
-      if (!prev) return prev;
-      const newPlayers = [...prev.players, { id: `player_${Date.now()}`, symbol: playerSymbol, name: 'Player' }];
-      return {
-        ...prev,
-        playersJoined: prev.playersJoined + 1,
-        players: newPlayers,
-        availableSymbols: prev.availableSymbols.filter((s) => s.value !== playerSymbol),
-        isReady: newPlayers.length === prev.maxPlayers,
-      };
-    });
-    setIsJoined(true);
-    setError(null);
+
+    try {
+      const response = await fetch(`https://base-monopoly-production.up.railway.app/api/games/${gameState.gameId}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: playerSymbol, name: 'Player' }), // Adjust based on API requirements
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to join game: ${response.status} ${response.statusText}`);
+      }
+      const updatedGame = await response.json();
+      setGameState({
+        ...gameState,
+        playersJoined: updatedGame.players_joined || gameState.playersJoined + 1,
+        players: updatedGame.players || [...gameState.players, { id: `player_${Date.now()}`, symbol: playerSymbol, name: 'Player' }],
+        availableSymbols: gameState.availableSymbols.filter((s) => s.value !== playerSymbol),
+        isReady: updatedGame.status === 'PENDING' && updatedGame.players_joined >= gameState.maxPlayers,
+      });
+      setIsJoined(true);
+      setError(null);
+    } catch (err: any) {
+      console.error('Error joining game:', err);
+      setError(err.message || 'Failed to join game. Please try again.');
+    }
   };
 
-  const handleLeaveGame = () => {
-    setGameState((prev) => {
-      if (!prev) return prev;
-      const symbolObj = { value: playerSymbol, label: tokens.find((t) => t.value.toString() === playerSymbol)?.emoji + ' ' + tokens.find((t) => t.value.toString() === playerSymbol)?.name || '' };
-      return {
-        ...prev,
-        playersJoined: Math.max(prev.playersJoined - 1, 1),
-        players: prev.players.filter((p) => p.symbol !== playerSymbol),
-        availableSymbols: [...prev.availableSymbols, symbolObj as any],
+  const handleLeaveGame = async () => {
+    try {
+      const response = await fetch(`https://base-monopoly-production.up.railway.app/api/games/${gameState!.gameId}/leave`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: playerSymbol }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to leave game: ${response.status} ${response.statusText}`);
+      }
+      const updatedGame = await response.json();
+      const symbolObj = {
+        value: playerSymbol,
+        label: tokens.find((t) => t.value.toString() === playerSymbol)?.emoji + ' ' + tokens.find((t) => t.value.toString() === playerSymbol)?.name || '',
       };
-    });
-    setIsJoined(false);
-    setPlayerSymbol('');
-    setError(null);
+      setGameState({
+        ...gameState!,
+        playersJoined: updatedGame.players_joined || Math.max(gameState!.playersJoined - 1, 1),
+        players: updatedGame.players || gameState!.players.filter((p) => p.symbol !== playerSymbol),
+        availableSymbols: [...gameState!.availableSymbols, symbolObj as any],
+      });
+      setIsJoined(false);
+      setPlayerSymbol('');
+      setError(null);
+    } catch (err: any) {
+      console.error('Error leaving game:', err);
+      setError(err.message || 'Failed to leave game. Please try again.');
+    }
+  };
+
+  const handleGoHome = () => {
+    router.push('/');
   };
 
   if (loading) {
@@ -172,13 +201,19 @@ const GameWaiting = () => {
   if (error || !gameState) {
     return (
       <section className="w-full h-[calc(100dvh-87px)] flex items-center justify-center bg-gray-900">
-        <div className="text-center">
+        <div className="text-center space-y-4">
           <p className="text-red-500 text-xl font-semibold font-orbitron mb-4">{error || 'Game not found'}</p>
           <button
             onClick={() => router.push('/join-room')}
             className="bg-[#00F0FF] text-black px-4 py-2 rounded font-orbitron"
           >
             Back to Join Room
+          </button>
+          <button
+            onClick={handleGoHome}
+            className="bg-[#00F0FF] text-black px-4 py-2 rounded font-orbitron"
+          >
+            Go to Home
           </button>
         </div>
       </section>
@@ -293,12 +328,21 @@ const GameWaiting = () => {
             </p>
           )}
 
-          <button
-            onClick={() => router.push('/join-room')}
-            className="w-full mt-3 text-[#0FF0FC] text-sm font-orbitron hover:text-[#00D4E6] transition-colors duration-200"
-          >
-            Back to Join Room
-          </button>
+          <div className="flex justify-between mt-3">
+            <button
+              onClick={() => router.push('/join-room')}
+              className="text-[#0FF0FC] text-sm font-orbitron hover:text-[#00D4E6] transition-colors duration-200"
+            >
+              Back to Join Room
+            </button>
+            <button
+              onClick={handleGoHome}
+              className="flex items-center text-[#0FF0FC] text-sm font-orbitron hover:text-[#00D4E6] transition-colors duration-200"
+            >
+              <IoHomeOutline className="mr-1 w-4 h-4" />
+              Go to Home
+            </button>
+          </div>
 
           {error && (
             <p className="text-red-500 text-xs mt-4 text-center animate-pulse">{error}</p>
