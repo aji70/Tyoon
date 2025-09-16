@@ -5,12 +5,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { PiTelegramLogoLight } from 'react-icons/pi';
 import { FaXTwitter } from 'react-icons/fa6';
 import { IoCopyOutline, IoHomeOutline } from 'react-icons/io5';
-import { useJoinGame } from '@/context/ContractProvider';
+import { useAccount } from 'wagmi';
+import { useIsInGame, useJoinGame, useGetGameByCode } from '@/context/ContractProvider';
 
 interface Token {
   name: string;
   emoji: string;
-  value: number;
+  value: string;
 }
 
 interface GameState {
@@ -24,24 +25,21 @@ interface GameState {
 }
 
 const tokens: Token[] = [
-  { name: 'Hat', emoji: '🎩', value: 0 },
-  { name: 'Car', emoji: '🚗', value: 1 },
-  { name: 'Dog', emoji: '🐕', value: 2 },
-  { name: 'Thimble', emoji: '🧵', value: 3 },
-  { name: 'Iron', emoji: '🧼', value: 4 },
-  { name: 'Battleship', emoji: '🚢', value: 5 },
-  { name: 'Boot', emoji: '👞', value: 6 },
-  { name: 'Wheelbarrow', emoji: '🛒', value: 7 },
+  { name: 'Hat', emoji: '🎩', value: 'hat' },
+  { name: 'Car', emoji: '🚗', value: 'car' },
+  { name: 'Dog', emoji: '🐕', value: 'dog' },
+  { name: 'Thimble', emoji: '🧵', value: 'thimble' },
+  { name: 'Iron', emoji: '🧼', value: 'iron' },
+  { name: 'Battleship', emoji: '🚢', value: 'battleship' },
+  { name: 'Boot', emoji: '👞', value: 'boot' },
+  { name: 'Wheelbarrow', emoji: '🛒', value: 'wheelbarrow' },
 ];
-
-
-=
-
 
 const GameWaiting = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
   const gameCode = searchParams.get('gameCode')?.toUpperCase();
+  const { address } = useAccount();
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [playerSymbol, setPlayerSymbol] = useState<string>('');
   const [isJoined, setIsJoined] = useState<boolean>(false);
@@ -49,6 +47,41 @@ const GameWaiting = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
+  const { data: isInGame, isLoading: isInGameLoading } = useIsInGame(
+    gameState?.gameId,
+    address,
+    { enabled: !!address && !!gameState?.gameId }
+  );
+
+  
+  const { data: contractGame, isLoading: contractGameLoading, error: contractGameError } = useGetGameByCode(
+    gameCode,
+    { enabled: !!gameCode }
+  );
+  
+  const contractId = contractGame?.id || null;
+
+const { write: joinGame, isPending: isJoining, error: joinError } = useJoinGame(
+  contractId ? Number(contractId) : 0,
+  playerSymbol
+);
+
+  // Log contract game data
+  useEffect(() => {
+    console.log('Game Code Input:', gameCode);
+    console.log('Contract Game Loading:', contractGameLoading);
+    if (contractGame && !contractGameLoading) {
+      console.log('Contract Game Data:', contractGame);
+    }
+    if (contractGameError) {
+      console.error('Contract Game Error:', contractGameError.message);
+    }
+    if (!contractGame && !contractGameLoading && !contractGameError) {
+      console.warn('Contract Game Data is undefined, but no error occurred');
+    }
+  }, [gameCode, contractGame, contractGameLoading, contractGameError]);
+
+  // Fetch game state from API
   useEffect(() => {
     if (!gameCode) {
       setError('No game code provided. Please enter a valid game code.');
@@ -58,26 +91,36 @@ const GameWaiting = () => {
 
     const fetchGameState = async () => {
       try {
-        const response = await fetch(`https://base-monopoly-production.up.railway.app/api/games/code/${gameCode}`);
+        const response = await fetch(
+          `https://base-monopoly-production.up.railway.app/api/games/code/${gameCode}`
+        );
         if (!response.ok) {
-          throw new Error(`Game ${gameCode} not found: ${response.status} ${response.statusText}`);
+          throw new Error(
+            `Game ${gameCode} not found: ${response.status} ${response.statusText}`
+          );
         }
         const gameData = await response.json();
         if (gameData.status !== 'PENDING') {
           throw new Error(`Game ${gameCode} has already started or ended.`);
         }
 
-        // Map API response to GameState format
         const fetchedState: GameState = {
           gameId: gameData.id,
           code: gameData.code,
           maxPlayers: gameData.number_of_players,
           playersJoined: gameData.players_joined || 1,
-          players: gameData.players || [{ id: 'creator', symbol: '0', name: 'Creator' }], // Adjust based on API response
-          isReady: gameData.status === 'PENDING' && gameData.players_joined >= gameData.number_of_players,
+          players: gameData.players || [
+            { id: 'creator', symbol: 'hat', name: 'Creator' },
+          ],
+          isReady:
+            gameData.status === 'PENDING' &&
+            gameData.players_joined >= gameData.number_of_players,
           availableSymbols: tokens
-            .filter((t) => !gameData.players?.some((p: any) => p.symbol === t.value.toString()))
-            .map((t) => ({ value: t.value.toString(), label: `${t.emoji} ${t.name}` })),
+            .filter((t) => !gameData.players?.some((p: any) => p.symbol === t.value))
+            .map((t) => ({
+              value: t.value,
+              label: `${t.emoji} ${t.name}`,
+            })),
         };
         setGameState(fetchedState);
       } catch (err: any) {
@@ -89,28 +132,47 @@ const GameWaiting = () => {
     };
 
     fetchGameState();
-
-    // Polling for real-time updates (replace with WebSocket if available)
-    const interval = setInterval(fetchGameState, 5000); // Poll every 5 seconds
+    const interval = setInterval(fetchGameState, 5000);
     return () => clearInterval(interval);
   }, [gameCode]);
 
-  // Auto-redirect when ready and joined
+  // Handle player join status
   useEffect(() => {
-    if (gameState?.isReady && isJoined) {
-      const timer = setTimeout(() => {
-        router.push(`/game-play?gameId=${gameState.gameId}`);
-      }, 2000); // 2s delay for celebration
-      return () => clearTimeout(timer);
+    if (!isInGameLoading && isInGame !== undefined) {
+      setIsJoined(isInGame);
+      if (isInGame) {
+        const player = gameState?.players.find(
+          (p) => p.id.toLowerCase() === address?.toLowerCase()
+        );
+        if (player) {
+          setPlayerSymbol(player.symbol);
+        }
+      }
     }
-  }, [gameState?.isReady, isJoined, gameState?.gameId, router]);
+  }, [isInGame, isInGameLoading, address, gameState]);
 
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : 'https://base-monopoly-production.up.railway.app');
+  const handleStartGame = () => {
+    if (gameCode) {
+      router.push(`/game-play?gameCode=${gameCode}`);
+    } else {
+      setError('Game code not available. Please try again.');
+    }
+  };
+
+  const baseUrl =
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    (typeof window !== 'undefined'
+      ? window.location.origin
+      : 'https://base-monopoly-production.up.railway.app');
   const gameUrl = `${baseUrl}/game-waiting?gameCode=${gameCode}`;
   const shareText = `Join my Blockopoly game! Code: ${gameCode}. Waiting room: ${gameUrl}`;
-  const telegramShareUrl = `https://t.me/share/url?url=${encodeURIComponent(gameUrl)}&text=${encodeURIComponent(shareText)}`;
-  const twitterShareUrl = `https://x.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
-  console.log("Game Code:", gameCode);
+  const telegramShareUrl = `https://t.me/share/url?url=${encodeURIComponent(
+    gameUrl
+  )}&text=${encodeURIComponent(shareText)}`;
+  const twitterShareUrl = `https://x.com/intent/tweet?text=${encodeURIComponent(
+    shareText
+  )}`;
+
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(gameUrl);
@@ -126,28 +188,13 @@ const GameWaiting = () => {
       setError('Please select a valid symbol.');
       return;
     }
-    if (gameState.playersJoined >= gameState.maxPlayers) {
+    if (playersJoined >= maxPlayers) {
       setError('Game is full!');
       return;
     }
 
     try {
-      const response = await fetch(`https://base-monopoly-production.up.railway.app/api/games/${gameState.gameId}/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: playerSymbol, name: 'Player' }), // Adjust based on API requirements
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to join game: ${response.status} ${response.statusText}`);
-      }
-      const updatedGame = await response.json();
-      setGameState({
-        ...gameState,
-        playersJoined: updatedGame.players_joined || gameState.playersJoined + 1,
-        players: updatedGame.players || [...gameState.players, { id: `player_${Date.now()}`, symbol: playerSymbol, name: 'Player' }],
-        availableSymbols: gameState.availableSymbols.filter((s) => s.value !== playerSymbol),
-        isReady: updatedGame.status === 'PENDING' && updatedGame.players_joined >= gameState.maxPlayers,
-      });
+      await joinGame();
       setIsJoined(true);
       setError(null);
     } catch (err: any) {
@@ -158,24 +205,35 @@ const GameWaiting = () => {
 
   const handleLeaveGame = async () => {
     try {
-      const response = await fetch(`https://base-monopoly-production.up.railway.app/api/games/${gameState!.gameId}/leave`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: playerSymbol }),
-      });
+      const response = await fetch(
+        `https://base-monopoly-production.up.railway.app/api/games/${gameState!.gameId}/leave`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: playerSymbol }),
+        }
+      );
       if (!response.ok) {
-        throw new Error(`Failed to leave game: ${response.status} ${response.statusText}`);
+        throw new Error(
+          `Failed to leave game: ${response.status} ${response.statusText}`
+        );
       }
       const updatedGame = await response.json();
       const symbolObj = {
         value: playerSymbol,
-        label: tokens.find((t) => t.value.toString() === playerSymbol)?.emoji + ' ' + tokens.find((t) => t.value.toString() === playerSymbol)?.name || '',
+        label:
+          tokens.find((t) => t.value === playerSymbol)?.emoji +
+          ' ' +
+          tokens.find((t) => t.value === playerSymbol)?.name ||
+          '',
       };
       setGameState({
         ...gameState!,
         playersJoined: updatedGame.players_joined || Math.max(gameState!.playersJoined - 1, 1),
-        players: updatedGame.players || gameState!.players.filter((p) => p.symbol !== playerSymbol),
-        availableSymbols: [...gameState!.availableSymbols, symbolObj as any],
+        players:
+          updatedGame.players ||
+          gameState!.players.filter((p) => p.symbol !== playerSymbol),
+        availableSymbols: [...gameState!.availableSymbols, symbolObj],
       });
       setIsJoined(false);
       setPlayerSymbol('');
@@ -190,10 +248,17 @@ const GameWaiting = () => {
     router.push('/');
   };
 
-  if (loading) {
+  // Use contract data for playersJoined and maxPlayers, with fallback to gameState
+  const playersJoined = contractGame?.joinedPlayers ?? gameState?.playersJoined ?? 0;
+  const maxPlayers = contractGame?.numberOfPlayers ?? gameState?.maxPlayers ?? 0;
+  const canStartGame =  playersJoined === maxPlayers;
+
+  if (loading || isInGameLoading || contractGameLoading) {
     return (
       <section className="w-full h-[calc(100dvh-87px)] flex items-center justify-center bg-gray-900">
-        <p className="text-[#00F0FF] text-xl font-semibold font-orbitron animate-pulse">Loading game...</p>
+        <p className="text-[#00F0FF] text-xl font-semibold font-orbitron animate-pulse">
+          Loading game...
+        </p>
       </section>
     );
   }
@@ -202,7 +267,9 @@ const GameWaiting = () => {
     return (
       <section className="w-full h-[calc(100dvh-87px)] flex items-center justify-center bg-gray-900">
         <div className="text-center space-y-4">
-          <p className="text-red-500 text-xl font-semibold font-orbitron mb-4">{error || 'Game not found'}</p>
+          <p className="text-red-500 text-xl font-semibold font-orbitron mb-4">
+            {error || contractGameError?.message || 'Game not found'}
+          </p>
           <button
             onClick={() => router.push('/join-room')}
             className="bg-[#00F0FF] text-black px-4 py-2 rounded font-orbitron"
@@ -220,9 +287,9 @@ const GameWaiting = () => {
     );
   }
 
-  const showJoin = !isJoined && gameState.playersJoined < gameState.maxPlayers;
-  const showLeave = isJoined && !gameState.isReady;
-  const showShare = gameState.playersJoined < gameState.maxPlayers;
+  const showJoin = !isJoined && playersJoined < maxPlayers;
+  const showLeave = isJoined && playersJoined < maxPlayers;
+  const showShare = playersJoined < maxPlayers;
 
   return (
     <section className="w-full h-[calc(100dvh-87px)] bg-settings bg-cover bg-fixed bg-center">
@@ -237,14 +304,20 @@ const GameWaiting = () => {
 
           <div className="text-center space-y-3 mb-6">
             <p className="text-[#869298] text-sm">
-              {gameState.isReady ? 'All players joined! Starting soon...' : 'Waiting for players to join...'}
+              {playersJoined === maxPlayers
+                ? 'All players joined! Ready to start...'
+                : 'Waiting for players to join...'}
             </p>
             <p className="text-[#00F0FF] text-lg font-semibold">
-              Players: {gameState.playersJoined}/{gameState.maxPlayers}
+              Players: {playersJoined}/{maxPlayers}
             </p>
             {gameState.players.map((player) => (
-              <p key={player.id} className="text-sm text-[#F0F7F7] flex items-center justify-center">
-                {tokens.find((t) => t.value.toString() === player.symbol)?.emoji} {player.name}
+              <p
+                key={player.id}
+                className="text-sm text-[#F0F7F7] flex items-center justify-center"
+              >
+                {tokens.find((t) => t.value === player.symbol)?.emoji}{' '}
+                {player.name}
               </p>
             ))}
           </div>
@@ -258,11 +331,16 @@ const GameWaiting = () => {
                   readOnly
                   className="w-full bg-[#0A1A1B] text-[#F0F7F7] p-2 rounded border border-[#00F0FF]/30 focus:outline-none font-orbitron text-sm"
                 />
-                <button onClick={handleCopyLink} className="flex items-center justify-center bg-[#0A1A1B] text-[#0FF0FC] text-sm font-orbitron font-semibold py-2 px-3 rounded-lg border border-[#00F0FF]/30 hover:bg-[#00F0FF]/20 transition-all duration-300">
+                <button
+                  onClick={handleCopyLink}
+                  className="flex items-center justify-center bg-[#0A1A1B] text-[#0FF0FC] text-sm font-orbitron font-semibold py-2 px-3 rounded-lg border border-[#00F0FF]/30 hover:bg-[#00F0FF]/20 transition-all duration-300"
+                >
                   <IoCopyOutline className="w-5 h-5" />
                 </button>
               </div>
-              {copySuccess && <p className="text-green-400 text-xs text-center">{copySuccess}</p>}
+              {copySuccess && (
+                <p className="text-green-400 text-xs text-center">{copySuccess}</p>
+              )}
               <div className="flex justify-center gap-4">
                 <a
                   href={telegramShareUrl}
@@ -289,13 +367,17 @@ const GameWaiting = () => {
           {showJoin && (
             <div className="mt-6 space-y-4">
               <div className="flex flex-col">
-                <label className="text-sm text-gray-300 mb-1 font-orbitron">Choose Your Token</label>
+                <label className="text-sm text-gray-300 mb-1 font-orbitron">
+                  Choose Your Token
+                </label>
                 <select
                   value={playerSymbol}
                   onChange={(e) => setPlayerSymbol(e.target.value)}
                   className="bg-[#0A1A1B] text-[#F0F7F7] p-2 rounded border border-[#00F0FF]/30 focus:outline-none focus:ring-2 focus:ring-[#00F0FF] font-orbitron"
                 >
-                  <option value="" disabled>Select a token</option>
+                  <option value="" disabled>
+                    Select a token
+                  </option>
                   {gameState.availableSymbols.map((symbol) => (
                     <option key={symbol.value} value={symbol.value}>
                       {symbol.label}
@@ -306,9 +388,9 @@ const GameWaiting = () => {
               <button
                 onClick={handleJoinGame}
                 className="w-full bg-[#00F0FF] text-black text-sm font-orbitron font-semibold py-3 rounded-lg hover:bg-[#00D4E6] transition-all duration-300 shadow-md"
-                disabled={!playerSymbol}
+                disabled={!playerSymbol || isJoining}
               >
-                Join Game
+                {isJoining ? 'Joining...' : 'Join Game'}
               </button>
             </div>
           )}
@@ -322,10 +404,13 @@ const GameWaiting = () => {
             </button>
           )}
 
-          {gameState.isReady && (
-            <p className="text-center text-green-400 text-sm font-orbitron mt-4 animate-pulse">
-              🚀 Game starting in 2 seconds...
-            </p>
+          {canStartGame && (
+            <button
+              onClick={handleStartGame}
+              className="w-full mt-6 bg-[#00FF00] text-black text-sm font-orbitron font-semibold py-3 rounded-lg hover:bg-[#00CC00] transition-all duration-300 shadow-md"
+            >
+              Start Game
+            </button>
           )}
 
           <div className="flex justify-between mt-3">
@@ -344,8 +429,10 @@ const GameWaiting = () => {
             </button>
           </div>
 
-          {error && (
-            <p className="text-red-500 text-xs mt-4 text-center animate-pulse">{error}</p>
+          {(error || joinError || contractGameError) && (
+            <p className="text-red-500 text-xs mt-4 text-center animate-pulse">
+              {error || joinError?.message || contractGameError?.message || 'An error occurred'}
+            </p>
           )}
         </div>
       </main>
