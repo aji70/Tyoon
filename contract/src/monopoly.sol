@@ -244,6 +244,10 @@ contract Blockopoly {
     return gp.order;
 }
 
+function gamePlayerInGame(uint256 gameId, address player) public view returns (bool) {
+    return gamePlayersMap[gameId][player];
+}
+
     function startGame(uint256 gameId) public {
         Game storage game = games[gameId];
         require(msg.sender == game.creator, "Only creator");
