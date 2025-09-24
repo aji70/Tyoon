@@ -26,4 +26,7 @@ export interface BoardSquare {
   position: "top" | "bottom" | "left" | "right";
   gridPosition: { row: number; col: number };
   icon: string;
+  // Added: Properties for game state
+  owner?: string | null;
+  ownerUsername?: string | null;
 }
