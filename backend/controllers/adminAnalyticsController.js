@@ -104,6 +104,10 @@ export async function minipay(req, res) {
     res.json({ success: true, data });
   } catch (err) {
     logger.error({ err }, "admin analytics minipay error");
-    res.status(500).json({ success: false, error: "Failed to load MiniPay stats" });
+    res.status(500).json({
+      success: false,
+      error: "Failed to load MiniPay stats",
+      detail: err?.sqlMessage || err?.message || "unknown",
+    });
   }
 }

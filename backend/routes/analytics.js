@@ -59,8 +59,15 @@ router.get("/minipay", async (req, res) => {
     res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=120");
     res.json({ success: true, data });
   } catch (err) {
-    logger.error({ err }, "Analytics minipay error");
-    res.status(500).json({ success: false, error: "Failed to load MiniPay stats" });
+    logger.error(
+      { err, message: err?.message, code: err?.code, sqlMessage: err?.sqlMessage },
+      "Analytics minipay error"
+    );
+    res.status(500).json({
+      success: false,
+      error: "Failed to load MiniPay stats",
+      detail: err?.sqlMessage || err?.message || "unknown",
+    });
   }
 });
 

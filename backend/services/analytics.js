@@ -570,9 +570,11 @@ export async function getMinipayStats(options = {}) {
   const dayCount = Math.ceil((rangeEnd - rangeStart) / (24 * 60 * 60 * 1000)) + 1;
   if (dayCount > 62) rangeStart = new Date(rangeEnd.getTime() - 61 * 24 * 60 * 60 * 1000);
 
-  const hasMinipayCol = await db.schema.hasColumn("game", "is_minipay");
+  const hasGamesTable = await db.schema.hasTable("games");
+  const hasMinipayCol =
+    hasGamesTable && (await db.schema.hasColumn("games", "is_minipay"));
   const hasAgents = await db.schema.hasTable("user_agents");
-  const hasIsAi = await db.schema.hasColumn("game", "is_ai");
+  const hasIsAi = hasGamesTable && (await db.schema.hasColumn("games", "is_ai"));
 
   const emptyGames = {
     total: 0,
@@ -589,10 +591,10 @@ export async function getMinipayStats(options = {}) {
   let games = { ...emptyGames };
   let gamesOverTime = [];
   let note =
-    "Counts use game.is_minipay. Historical rows may include some Celo main-app creates; new MiniPay-app creates are always tagged.";
+    "Counts use games.is_minipay. Historical rows may include some Celo main-app creates; new MiniPay-app creates are always tagged.";
 
   if (hasMinipayCol) {
-    const mp = () => db("game").where("is_minipay", 1);
+    const mp = () => db("games").where("is_minipay", true);
     const [
       totalGames,
       gamesByStatus,
@@ -651,7 +653,7 @@ export async function getMinipayStats(options = {}) {
     const finishedMap = Object.fromEntries(
       (finishedByDay || []).map((r) => [toIsoDateString(r.day), Number(r.count)])
     );
-    for (let d = new Date(rangeStart); d <= rangeEnd; d.setDate(d.getDate() + 1)) {
+    for (let d = new Date(rangeStart); d <= rangeEnd; d = addUtcDays(d, 1)) {
       const dateStr = toIsoDateString(d);
       if (!dateStr) continue;
       gamesOverTime.push({
@@ -661,7 +663,7 @@ export async function getMinipayStats(options = {}) {
       });
     }
   } else {
-    note = "game.is_minipay column missing — MiniPay game stats unavailable until migration runs.";
+    note = "games.is_minipay column missing — MiniPay game stats unavailable until migration runs.";
   }
 
   let agents = {
@@ -675,39 +677,49 @@ export async function getMinipayStats(options = {}) {
   };
 
   if (hasAgents) {
-    const hasErc = await db.schema.hasColumn("user_agents", "erc8004_agent_id");
-    const hasPublic = await db.schema.hasColumn("user_agents", "is_public");
-    const [
-      totalAgents,
-      byStatus,
-      createdToday,
-      createdThisWeek,
-      createdThisMonth,
-      withErc8004,
-      publicCount,
-    ] = await Promise.all([
-      db("user_agents").count("* as count").first(),
-      db("user_agents").select("status").count("* as count").groupBy("status"),
-      db("user_agents").where("created_at", ">=", startOfToday).count("* as count").first(),
-      db("user_agents").where("created_at", ">=", startOfWeek).count("* as count").first(),
-      db("user_agents").where("created_at", ">=", startOfMonth).count("* as count").first(),
-      hasErc
-        ? db("user_agents").whereNotNull("erc8004_agent_id").count("* as count").first()
-        : Promise.resolve({ count: 0 }),
-      hasPublic
-        ? db("user_agents").where("is_public", 1).count("* as count").first()
-        : Promise.resolve({ count: 0 }),
-    ]);
+    try {
+      const hasStatus = await db.schema.hasColumn("user_agents", "status");
+      const hasErc = await db.schema.hasColumn("user_agents", "erc8004_agent_id");
+      const hasPublic = await db.schema.hasColumn("user_agents", "is_public");
+      const [
+        totalAgents,
+        byStatus,
+        createdToday,
+        createdThisWeek,
+        createdThisMonth,
+        withErc8004,
+        publicCount,
+      ] = await Promise.all([
+        db("user_agents").count("* as count").first(),
+        hasStatus
+          ? db("user_agents").select("status").count("* as count").groupBy("status")
+          : Promise.resolve([]),
+        db("user_agents").where("created_at", ">=", startOfToday).count("* as count").first(),
+        db("user_agents").where("created_at", ">=", startOfWeek).count("* as count").first(),
+        db("user_agents").where("created_at", ">=", startOfMonth).count("* as count").first(),
+        hasErc
+          ? db("user_agents").whereNotNull("erc8004_agent_id").count("* as count").first()
+          : Promise.resolve({ count: 0 }),
+        hasPublic
+          ? db("user_agents").where("is_public", true).count("* as count").first()
+          : Promise.resolve({ count: 0 }),
+      ]);
 
-    agents = {
-      total: Number(totalAgents?.count ?? 0),
-      byStatus: Object.fromEntries((byStatus || []).map((r) => [r.status || "unknown", Number(r.count)])),
-      createdToday: Number(createdToday?.count ?? 0),
-      createdThisWeek: Number(createdThisWeek?.count ?? 0),
-      createdThisMonth: Number(createdThisMonth?.count ?? 0),
-      withErc8004: Number(withErc8004?.count ?? 0),
-      publicCount: Number(publicCount?.count ?? 0),
-    };
+      agents = {
+        total: Number(totalAgents?.count ?? 0),
+        byStatus: Object.fromEntries(
+          (byStatus || []).map((r) => [r.status || "unknown", Number(r.count)])
+        ),
+        createdToday: Number(createdToday?.count ?? 0),
+        createdThisWeek: Number(createdThisWeek?.count ?? 0),
+        createdThisMonth: Number(createdThisMonth?.count ?? 0),
+        withErc8004: Number(withErc8004?.count ?? 0),
+        publicCount: Number(publicCount?.count ?? 0),
+      };
+    } catch (agentErr) {
+      logger.warn({ err: agentErr, message: agentErr?.message }, "getMinipayStats agents query failed");
+      note = `${note} Agent counts unavailable (${agentErr?.message || "query error"}).`;
+    }
   }
 
   return {
