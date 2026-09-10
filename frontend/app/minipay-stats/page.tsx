@@ -16,12 +16,18 @@ type CurrencyBucket = {
 
 type MinipayStatsData = {
   users?: {
-    distinctPlayers: number;
-    distinctCreators: number;
+    distinctPlayers?: number;
+    distinctCreators?: number;
+    distinctHumanPlayers?: number;
+    distinctHumanCreators?: number;
+    taggedPlayersIncludingAi?: number;
   };
   transactions?: {
     gamesCreated: number;
+    humanGames?: number;
+    aiGames?: number;
     playerJoins: number;
+    humanPlayerJoins?: number;
     onChainGames: number;
     softPerkPurchases: number;
     tipPackPurchases: number;
@@ -30,13 +36,25 @@ type MinipayStatsData = {
   revenue?: {
     method: string;
     note?: string;
+    softPerksAll?: {
+      purchaseCount: number;
+      byCurrency?: Record<string, CurrencyBucket>;
+      scope?: string;
+    };
+    tipPacksAll?: {
+      purchaseCount: number;
+      usdcFormatted: string;
+      scope?: string;
+    };
     minipaySoftPerks?: {
       purchaseCount: number;
       byCurrency?: Record<string, CurrencyBucket>;
+      note?: string;
     };
     minipayTipPacks?: {
       purchaseCount: number;
       usdcFormatted: string;
+      note?: string;
     };
     celoShop?: {
       scope?: string;
@@ -55,6 +73,10 @@ type MinipayStatsData = {
       included: boolean;
       note?: string;
     };
+  };
+  dataQuality?: {
+    isMinipayTagNoisy?: boolean;
+    warning?: string;
   };
   minipayGames: {
     total: number;
@@ -178,9 +200,21 @@ export default function MinipayStatsPublicPage() {
   }, [data]);
 
   const softPerkCurrencies = useMemo(() => {
-    const by = data?.revenue?.minipaySoftPerks?.byCurrency || {};
+    const by =
+      data?.revenue?.softPerksAll?.byCurrency ||
+      data?.revenue?.minipaySoftPerks?.byCurrency ||
+      {};
     return Object.entries(by).filter(([, v]) => Number(v?.formatted || 0) > 0);
   }, [data]);
+
+  const tipPackFormatted =
+    data?.revenue?.tipPacksAll?.usdcFormatted ??
+    data?.revenue?.minipayTipPacks?.usdcFormatted ??
+    "0";
+  const tipPackCount =
+    data?.revenue?.tipPacksAll?.purchaseCount ??
+    data?.revenue?.minipayTipPacks?.purchaseCount ??
+    0;
 
   const shopCurrencies = useMemo(() => {
     const by = data?.revenue?.celoShop?.revenueByCurrency || {};
@@ -266,7 +300,11 @@ export default function MinipayStatsPublicPage() {
 
         {data ? (
           <>
-            {data.note ? (
+            {data.dataQuality?.warning ? (
+              <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-100/80">
+                {data.dataQuality.warning}
+              </p>
+            ) : data.note ? (
               <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-100/80">
                 {data.note}
               </p>
@@ -275,36 +313,61 @@ export default function MinipayStatsPublicPage() {
             {data.users || data.transactions ? (
               <section>
                 <h2 className="mb-3 font-orbitron text-sm font-semibold uppercase tracking-wide text-[#F4C542]/90">
-                  Users & transactions
+                  Users & transactions (human-first)
                 </h2>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <StatCard
-                    label="MiniPay users"
-                    value={data.users?.distinctPlayers ?? 0}
-                    hint="Distinct players in MiniPay-tagged games"
+                    label="Human MiniPay users"
+                    value={
+                      data.users?.distinctHumanPlayers ??
+                      data.users?.distinctPlayers ??
+                      0
+                    }
+                    hint="Excludes AI_* bot seats"
                   />
                   <StatCard
-                    label="Creators"
-                    value={data.users?.distinctCreators ?? data.minipayGames.distinctCreators}
-                    hint="Distinct game hosts"
+                    label="Human creators"
+                    value={
+                      data.users?.distinctHumanCreators ??
+                      data.users?.distinctCreators ??
+                      data.minipayGames.distinctCreators
+                    }
+                    hint="Hosts excluding AI_* accounts"
                   />
                   <StatCard
-                    label="Attributed txs"
-                    value={data.transactions?.total ?? 0}
-                    hint="Games + joins + soft perks + tip packs"
+                    label="Human games (tagged)"
+                    value={
+                      data.transactions?.humanGames ?? data.minipayGames.humanGames
+                    }
+                    hint="is_minipay + not AI match"
                   />
                   <StatCard
-                    label="On-chain games"
+                    label="Human joins"
+                    value={data.transactions?.humanPlayerJoins ?? 0}
+                    hint="Player seats excluding AI bots"
+                  />
+                  <StatCard
+                    label="AI games (tagged)"
+                    value={data.transactions?.aiGames ?? data.minipayGames.aiGames}
+                    hint="Many historical Celo AI creates were mistagged MiniPay"
+                  />
+                  <StatCard
+                    label="All tagged games"
+                    value={data.transactions?.gamesCreated ?? data.minipayGames.total}
+                    hint="Noisy is_minipay flag — see warning"
+                  />
+                  <StatCard
+                    label="In-app purchases (txs)"
+                    value={
+                      (data.transactions?.softPerkPurchases ?? 0) +
+                      (data.transactions?.tipPackPurchases ?? 0)
+                    }
+                    hint="Soft perks + tip packs (all recorded)"
+                  />
+                  <StatCard
+                    label="On-chain tagged games"
                     value={data.transactions?.onChainGames ?? 0}
-                    hint="MiniPay games with contract_game_id"
                   />
-                  <StatCard label="Player joins" value={data.transactions?.playerJoins ?? 0} />
-                  <StatCard
-                    label="Soft perk buys"
-                    value={data.transactions?.softPerkPurchases ?? 0}
-                  />
-                  <StatCard label="Tip pack buys" value={data.transactions?.tipPackPurchases ?? 0} />
-                  <StatCard label="Games created" value={data.transactions?.gamesCreated ?? 0} />
                 </div>
               </section>
             ) : null}
@@ -319,23 +382,23 @@ export default function MinipayStatsPublicPage() {
                 ) : null}
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <StatCard
-                    label="MiniPay tip packs (USDC)"
-                    value={data.revenue.minipayTipPacks?.usdcFormatted ?? "0"}
-                    hint={`${data.revenue.minipayTipPacks?.purchaseCount ?? 0} purchases`}
+                    label="Tip packs (USDC)"
+                    value={tipPackFormatted}
+                    hint={`${tipPackCount} purchases · all recorded`}
                   />
                   {softPerkCurrencies.length === 0 ? (
                     <StatCard
-                      label="MiniPay soft perks"
+                      label="Soft perks (ex tip packs)"
                       value="0"
-                      hint={`${data.revenue.minipaySoftPerks?.purchaseCount ?? 0} purchases`}
+                      hint={`${data.revenue.softPerksAll?.purchaseCount ?? data.revenue.minipaySoftPerks?.purchaseCount ?? 0} purchases`}
                     />
                   ) : (
                     softPerkCurrencies.map(([token, bucket]) => (
                       <StatCard
                         key={token}
-                        label={`MiniPay soft perks (${token})`}
+                        label={`Soft perks (${token})`}
                         value={formatMoney(bucket)}
-                        hint={`${data.revenue?.minipaySoftPerks?.purchaseCount ?? 0} purchases`}
+                        hint={`${data.revenue?.softPerksAll?.purchaseCount ?? data.revenue?.minipaySoftPerks?.purchaseCount ?? 0} purchases`}
                       />
                     ))
                   )}
@@ -357,7 +420,7 @@ export default function MinipayStatsPublicPage() {
                         key={`shop-${token}`}
                         label={`Celo shop revenue (${token})`}
                         value={formatMoney(bucket)}
-                        hint="From CollectibleBought / BundleBought events — not treasury balance"
+                        hint="From sale events — not treasury balance"
                       />
                     ))}
                   </div>

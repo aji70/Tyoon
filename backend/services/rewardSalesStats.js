@@ -6,7 +6,7 @@ import { resolveRewardSystemAddress } from "./rewardSystemContract.js";
 const SALES_CACHE_TTL_MS = 10 * 60 * 1000;
 const salesCache = new Map();
 const VALID_PERIODS = new Set(["all", "day", "week", "month"]);
-const BLOCK_CHUNK_SIZE = 50_000;
+const BLOCK_CHUNK_SIZE = 4_500;
 
 const REWARD_SALES_ABI = [
   "event CollectibleBought(uint256 indexed tokenId, address indexed buyer, uint256 price, bool usedUsdc)",

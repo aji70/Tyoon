@@ -733,16 +733,36 @@ export async function getMinipayStats(options = {}) {
     }
   }
 
-  /** @type {{ distinctPlayers: number, distinctCreators: number }} */
+  /** @type {{
+   *   distinctHumanPlayers: number,
+   *   distinctHumanCreators: number,
+   *   taggedPlayersIncludingAi: number,
+   *   distinctCreators: number
+   * }} */
   const users = {
-    distinctPlayers: 0,
+    distinctHumanPlayers: 0,
+    distinctHumanCreators: 0,
+    taggedPlayersIncludingAi: 0,
     distinctCreators: games.distinctCreators || 0,
   };
 
-  /** @type {{ gamesCreated: number, playerJoins: number, onChainGames: number, softPerkPurchases: number, tipPackPurchases: number, total: number }} */
+  /** @type {{
+   *   gamesCreated: number,
+   *   humanGames: number,
+   *   aiGames: number,
+   *   playerJoins: number,
+   *   humanPlayerJoins: number,
+   *   onChainGames: number,
+   *   softPerkPurchases: number,
+   *   tipPackPurchases: number,
+   *   total: number
+   * }} */
   const transactions = {
     gamesCreated: games.total || 0,
+    humanGames: games.humanGames || 0,
+    aiGames: games.aiGames || 0,
     playerJoins: 0,
+    humanPlayerJoins: 0,
     onChainGames: 0,
     softPerkPurchases: 0,
     tipPackPurchases: 0,
@@ -756,10 +776,48 @@ export async function getMinipayStats(options = {}) {
     USDT: { raw: "0", formatted: "0", decimals: 6 },
   });
 
+  const sumPurchaseRows = async (rows) => {
+    const rawTotals = { TYC: 0n, USDC: 0n, cUSD: 0n, USDT: 0n };
+    for (const row of rows) {
+      const token = Number(row.payment_token);
+      const label =
+        token === 0 ? "TYC" : token === 1 ? "USDC" : token === 2 ? "cUSD" : token === 3 ? "USDT" : null;
+      if (!label) continue;
+      try {
+        rawTotals[label] += BigInt(String(row.amount || "0"));
+      } catch {
+        /* ignore */
+      }
+    }
+    const { formatUnits } = await import("ethers");
+    const byCurrency = emptyTokenBucket();
+    for (const [label, raw] of Object.entries(rawTotals)) {
+      const decimals = label === "TYC" ? 18 : 6;
+      byCurrency[label] = {
+        raw: raw.toString(),
+        formatted: formatUnits(raw, decimals),
+        decimals,
+      };
+    }
+    return byCurrency;
+  };
+
   const revenue = {
     method: "lifetime_inflows_not_treasury_balance",
     note:
-      "Actual revenue = sum of purchase/sale events over time. Withdrawing from the reward or game treasury lowers the on-chain balance but does not change these totals.",
+      "Revenue is lifetime purchase/sale inflows (DB + on-chain sale events). Treasury balance after withdrawFunds is leftover cash, not revenue.",
+    // All recorded soft-perk / tip purchases (not filtered by noisy is_minipay join)
+    softPerksAll: {
+      purchaseCount: 0,
+      byCurrency: emptyTokenBucket(),
+      scope: "all_soft_perk_purchases",
+    },
+    tipPacksAll: {
+      purchaseCount: 0,
+      usdcFormatted: "0",
+      scope: "all_tip_pack_purchases",
+    },
+    // Subset linked to is_minipay games (often undercounts if game_id null)
     minipaySoftPerks: {
       purchaseCount: 0,
       byCurrency: emptyTokenBucket(),
@@ -772,19 +830,27 @@ export async function getMinipayStats(options = {}) {
     houseFees: {
       included: false,
       note:
-        "5% house cut on staked MiniPay games is not summed here yet (stake lives on-chain). Soft perks + Celo shop below are the tracked inflows.",
+        "5% house cut on staked games is not included yet (stake is on-chain only).",
     },
+  };
+
+  const dataQuality = {
+    isMinipayTagNoisy: true,
+    warning:
+      "games.is_minipay historically included many main-app Celo creates (not only the MiniPay app). Prefer human-player counts below. Revenue uses all Celo in-app purchase rows + shop sale events so withdrawals do not zero it out.",
   };
 
   if (hasMinipayCol && hasPlayers) {
     try {
-      const playerRow = await db("game_players as gp")
+      const hasUsersTable = await db.schema.hasTable("users");
+      const taggedPlayers = await db("game_players as gp")
         .join("games as g", "g.id", "gp.game_id")
         .where("g.is_minipay", true)
         .whereNotNull("gp.user_id")
         .countDistinct("gp.user_id as count")
         .first();
-      users.distinctPlayers = Number(playerRow?.count ?? 0);
+      users.taggedPlayersIncludingAi = Number(taggedPlayers?.count ?? 0);
+      users.distinctPlayers = users.taggedPlayersIncludingAi; // backward compat for older UI
 
       const joinRow = await db("game_players as gp")
         .join("games as g", "g.id", "gp.game_id")
@@ -792,6 +858,44 @@ export async function getMinipayStats(options = {}) {
         .count("* as count")
         .first();
       transactions.playerJoins = Number(joinRow?.count ?? 0);
+
+      if (hasUsersTable) {
+        const humanPlayers = await db("game_players as gp")
+          .join("games as g", "g.id", "gp.game_id")
+          .join("users as u", "u.id", "gp.user_id")
+          .where("g.is_minipay", true)
+          .where(function () {
+            this.whereNull("u.username").orWhere("u.username", "not like", "AI_%");
+          })
+          .countDistinct("gp.user_id as count")
+          .first();
+        users.distinctHumanPlayers = Number(humanPlayers?.count ?? 0);
+
+        const humanCreators = await db("games as g")
+          .join("users as u", "u.id", "g.creator_id")
+          .where("g.is_minipay", true)
+          .where(function () {
+            this.whereNull("u.username").orWhere("u.username", "not like", "AI_%");
+          })
+          .countDistinct("g.creator_id as count")
+          .first();
+        users.distinctHumanCreators = Number(humanCreators?.count ?? 0);
+
+        const humanJoins = await db("game_players as gp")
+          .join("games as g", "g.id", "gp.game_id")
+          .join("users as u", "u.id", "gp.user_id")
+          .where("g.is_minipay", true)
+          .where(function () {
+            this.whereNull("u.username").orWhere("u.username", "not like", "AI_%");
+          })
+          .count("* as count")
+          .first();
+        transactions.humanPlayerJoins = Number(humanJoins?.count ?? 0);
+      } else {
+        users.distinctHumanPlayers = users.taggedPlayersIncludingAi;
+        users.distinctHumanCreators = users.distinctCreators;
+        transactions.humanPlayerJoins = transactions.playerJoins;
+      }
     } catch (userErr) {
       logger.warn({ err: userErr }, "getMinipayStats users/joins query failed");
     }
@@ -810,65 +914,71 @@ export async function getMinipayStats(options = {}) {
     }
   }
 
-  if (hasMinipayCol && hasSoftPerks) {
+  // Lifetime in-app purchases — do NOT require is_minipay join (that was returning 0).
+  if (hasSoftPerks) {
     try {
-      const rows = await db("soft_perk_purchases as spp")
-        .join("games as g", "g.id", "spp.game_id")
-        .where("g.is_minipay", true)
-        .select("spp.amount", "spp.payment_token", "spp.entitlement");
-      transactions.softPerkPurchases = rows.length;
+      const allRows = await db("soft_perk_purchases").select(
+        "amount",
+        "payment_token",
+        "entitlement",
+        "game_id"
+      );
+      transactions.softPerkPurchases = allRows.length;
+      const nonTip = allRows.filter((r) => r.entitlement !== "ai_tip_pack");
+      revenue.softPerksAll.purchaseCount = nonTip.length;
+      revenue.softPerksAll.byCurrency = await sumPurchaseRows(nonTip);
 
-      const revenueRows = rows.filter((r) => r.entitlement !== "ai_tip_pack");
-      revenue.minipaySoftPerks.purchaseCount = revenueRows.length;
-
-      const rawTotals = { TYC: 0n, USDC: 0n, cUSD: 0n, USDT: 0n };
-      for (const row of revenueRows) {
-        const token = Number(row.payment_token);
-        const label =
-          token === 0 ? "TYC" : token === 1 ? "USDC" : token === 2 ? "cUSD" : token === 3 ? "USDT" : null;
-        if (!label) continue;
-        try {
-          rawTotals[label] += BigInt(String(row.amount || "0"));
-        } catch {
-          /* ignore bad amount */
+      if (hasMinipayCol) {
+        const gameIds = allRows.map((r) => r.game_id).filter((id) => id != null);
+        if (gameIds.length > 0) {
+          const mpIds = new Set(
+            (await db("games").where("is_minipay", true).whereIn("id", gameIds).pluck("id")).map(Number)
+          );
+          const linked = allRows.filter((r) => r.game_id != null && mpIds.has(Number(r.game_id)));
+          const linkedNonTip = linked.filter((r) => r.entitlement !== "ai_tip_pack");
+          revenue.minipaySoftPerks.purchaseCount = linkedNonTip.length;
+          revenue.minipaySoftPerks.byCurrency = await sumPurchaseRows(linkedNonTip);
         }
-      }
-      const { formatUnits } = await import("ethers");
-      for (const [label, raw] of Object.entries(rawTotals)) {
-        const decimals = label === "TYC" ? 18 : 6;
-        revenue.minipaySoftPerks.byCurrency[label] = {
-          raw: raw.toString(),
-          formatted: formatUnits(raw, decimals),
-          decimals,
-        };
       }
     } catch (e) {
       logger.warn({ err: e }, "getMinipayStats soft perks revenue failed");
     }
   }
 
-  if (hasMinipayCol && hasTipPacks) {
+  if (hasTipPacks) {
     try {
-      const tipRows = await db("game_ai_tip_pack_purchases as tip")
-        .join("games as g", "g.id", "tip.game_id")
-        .where("g.is_minipay", true)
-        .select("tip.amount_usdc");
+      const tipRows = await db("game_ai_tip_pack_purchases").select("amount_usdc", "game_id");
       transactions.tipPackPurchases = tipRows.length;
-      revenue.minipayTipPacks.purchaseCount = tipRows.length;
+      revenue.tipPacksAll.purchaseCount = tipRows.length;
       let tipSum = 0;
       for (const row of tipRows) {
         const n = Number(row.amount_usdc);
         if (Number.isFinite(n)) tipSum += n;
       }
-      revenue.minipayTipPacks.usdcFormatted = tipSum.toFixed(6);
+      revenue.tipPacksAll.usdcFormatted = tipSum.toFixed(6);
+
+      if (hasMinipayCol) {
+        const linked = await db("game_ai_tip_pack_purchases as tip")
+          .join("games as g", "g.id", "tip.game_id")
+          .where("g.is_minipay", true)
+          .select("tip.amount_usdc");
+        revenue.minipayTipPacks.purchaseCount = linked.length;
+        let linkedSum = 0;
+        for (const row of linked) {
+          const n = Number(row.amount_usdc);
+          if (Number.isFinite(n)) linkedSum += n;
+        }
+        revenue.minipayTipPacks.usdcFormatted = linkedSum.toFixed(6);
+      }
     } catch (e) {
       logger.warn({ err: e }, "getMinipayStats tip packs failed");
     }
   }
 
-  // Tip packs are also rows in soft_perk_purchases — don't double-count in total.
   transactions.total =
-    transactions.gamesCreated + transactions.playerJoins + transactions.softPerkPurchases;
+    transactions.humanGames +
+    transactions.humanPlayerJoins +
+    transactions.softPerkPurchases;
 
   try {
     const { getRewardSalesStats } = await import("./rewardSalesStats.js");
@@ -876,7 +986,7 @@ export async function getMinipayStats(options = {}) {
     revenue.celoShop = {
       scope: "all_celo_reward_system",
       note:
-        "Lifetime NFT/collectible + bundle sales into the RewardSystem on Celo (sale events). Not MiniPay-wallet-filtered. Survives withdrawFunds.",
+        "Lifetime NFT/collectible + bundle sales (sale events). Not MiniPay-wallet-filtered. Survives withdrawFunds.",
       summary: shop?.summary || null,
       revenueByCurrency: shop?.revenueByCurrency || null,
       rewardAddress: shop?.rewardAddress || null,
@@ -886,10 +996,35 @@ export async function getMinipayStats(options = {}) {
     revenue.celoShop = { error: e?.message || "Failed to load Celo shop sales" };
   }
 
+  // Keep legacy tip/soft fields populated from "all" when linked subset is empty
+  if (
+    revenue.minipayTipPacks.purchaseCount === 0 &&
+    revenue.tipPacksAll.purchaseCount > 0
+  ) {
+    revenue.minipayTipPacks = {
+      purchaseCount: revenue.tipPacksAll.purchaseCount,
+      usdcFormatted: revenue.tipPacksAll.usdcFormatted,
+      note: "Showing all tip packs (is_minipay-linked subset was empty)",
+    };
+  }
+  if (
+    revenue.minipaySoftPerks.purchaseCount === 0 &&
+    revenue.softPerksAll.purchaseCount > 0
+  ) {
+    revenue.minipaySoftPerks = {
+      purchaseCount: revenue.softPerksAll.purchaseCount,
+      byCurrency: revenue.softPerksAll.byCurrency,
+      note: "Showing all soft perks (is_minipay-linked subset was empty)",
+    };
+  }
+
+  note = `${dataQuality.warning} ${note}`;
+
   return {
     users,
     transactions,
     revenue,
+    dataQuality,
     minipayGames: games,
     gamesOverTime,
     agents,
