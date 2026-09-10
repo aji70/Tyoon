@@ -6,6 +6,7 @@ import { getChainConfig } from "../config/chains.js";
 import { loadOverviewMetrics } from "./adminDashboardController.js";
 import { getContractTxStats } from "../services/contractTxStats.js";
 import { resolveRewardSystemAddress } from "../services/rewardSystemContract.js";
+import { getRewardSalesStats } from "../services/rewardSalesStats.js";
 
 const CACHE_TTL_SECONDS = Number(process.env.PUBLIC_STATS_CACHE_TTL_SECONDS) || 120;
 
@@ -62,8 +63,8 @@ async function loadPlayerEngagement() {
   };
 }
 
-/** Perk shop revenue = USDT balance held by the reward contract. Best-effort — null if the chain read fails. */
-async function loadPerkShopRevenueUsdt() {
+/** Current USDT left in the reward contract (leftover after withdrawals — NOT lifetime revenue). */
+async function loadPerkShopTreasuryBalanceUsdt() {
   try {
     const cfg = getChainConfig("CELO");
     if (!cfg?.rpcUrl) return null;
@@ -82,6 +83,104 @@ async function loadPerkShopRevenueUsdt() {
 }
 
 /**
+ * Lifetime perk / shop revenue = sale + tip inflows (survives withdrawFunds).
+ * Prefer stablecoin totals (USDT + USDC + cUSD). Tip packs from DB; NFT/shop from chain events.
+ */
+async function loadPerkShopLifetimeRevenue() {
+  const out = {
+    method: "lifetime_inflows_not_treasury_balance",
+    perkShopRevenueUsdt: null,
+    totalStableUsd: null,
+    byCurrency: null,
+    tipPacksUsdc: 0,
+    softPerksStableUsd: 0,
+    shopSales: null,
+    treasuryBalanceUsdt: null,
+  };
+
+  const paymentLabel = (token) => {
+    const t = Number(token);
+    if (t === 0) return "TYC";
+    if (t === 1) return "USDC";
+    if (t === 2) return "cUSD";
+    if (t === 3) return "USDT";
+    return null;
+  };
+
+  try {
+    const [shop, tipRows, softRows, treasuryBalanceUsdt] = await Promise.all([
+      getRewardSalesStats({ chain: "CELO", period: "all" }).catch((err) => {
+        logger.warn({ err: err?.message || err }, "public stats: reward sales stats failed");
+        return null;
+      }),
+      db.schema.hasTable("game_ai_tip_pack_purchases").then(async (has) =>
+        has ? db("game_ai_tip_pack_purchases").select("amount_usdc") : []
+      ),
+      db.schema.hasTable("soft_perk_purchases").then(async (has) =>
+        has
+          ? db("soft_perk_purchases").select("amount", "payment_token", "entitlement")
+          : []
+      ),
+      loadPerkShopTreasuryBalanceUsdt(),
+    ]);
+
+    out.treasuryBalanceUsdt = treasuryBalanceUsdt;
+
+    let tipSum = 0;
+    for (const r of tipRows || []) {
+      const n = Number(r.amount_usdc);
+      if (Number.isFinite(n)) tipSum += n;
+    }
+    out.tipPacksUsdc = tipSum;
+
+    // Soft perk rows already include tip packs (entitlement ai_tip_pack) — skip those to avoid double count with tip table.
+    let softUsdt = 0;
+    let softUsdc = 0;
+    let softCusd = 0;
+    for (const r of softRows || []) {
+      if (r.entitlement === "ai_tip_pack") continue;
+      const label = paymentLabel(r.payment_token);
+      if (!label || label === "TYC") continue;
+      try {
+        const raw = BigInt(String(r.amount || "0"));
+        const human = Number(formatUnits(raw, 6));
+        if (!Number.isFinite(human)) continue;
+        if (label === "USDT") softUsdt += human;
+        else if (label === "USDC") softUsdc += human;
+        else if (label === "cUSD") softCusd += human;
+      } catch {
+        /* ignore */
+      }
+    }
+    out.softPerksStableUsd = softUsdt + softUsdc + softCusd;
+    out.shopSales = shop?.summary || null;
+
+    const by = shop?.revenueByCurrency || {};
+    const shopUsdt = Number.parseFloat(by.USDT?.formatted || "0") || 0;
+    const shopUsdc = Number.parseFloat(by.USDC?.formatted || "0") || 0;
+    const shopCusd = Number.parseFloat(by.cUSD?.formatted || "0") || 0;
+    const totalStable =
+      shopUsdt + shopUsdc + shopCusd + out.tipPacksUsdc + out.softPerksStableUsd;
+
+    out.byCurrency = {
+      USDT: shopUsdt + softUsdt,
+      USDC: shopUsdc + softUsdc + out.tipPacksUsdc,
+      cUSD: shopCusd + softCusd,
+      tipPacksUsdc: out.tipPacksUsdc,
+      softPerksStableUsd: out.softPerksStableUsd,
+      TYC: Number.parseFloat(by.TYC?.formatted || "0") || 0,
+    };
+    out.totalStableUsd = Math.round(totalStable * 1e6) / 1e6;
+    out.perkShopRevenueUsdt = out.totalStableUsd;
+    return out;
+  } catch (err) {
+    logger.warn({ err }, "public stats: lifetime perk revenue unavailable");
+    out.treasuryBalanceUsdt = await loadPerkShopTreasuryBalanceUsdt();
+    return out;
+  }
+}
+
+/**
  * GET /api/public/stats
  * Query: period=all|day|week|month
  *
@@ -91,7 +190,8 @@ async function loadPerkShopRevenueUsdt() {
 export async function getPublicStats(req, res) {
   try {
     const periodParam = String(req.query.period || "all").toLowerCase();
-    const cacheKey = `public:stats:${periodParam}`;
+    // v2 cache key: revenue definition changed from treasury balance → lifetime inflows
+    const cacheKey = `public:stats:v2:${periodParam}`;
 
     const cached = await redis.getJSON(cacheKey);
     if (cached) {
@@ -100,9 +200,9 @@ export async function getPublicStats(req, res) {
 
     const { metrics, period } = await loadOverviewMetrics(req.query.period);
     const contractStats = await getContractTxStats({ period });
-    const [engagement, perkShopRevenueUsdt] = await Promise.all([
+    const [engagement, perkRevenue] = await Promise.all([
       loadPlayerEngagement(),
-      loadPerkShopRevenueUsdt(),
+      loadPerkShopLifetimeRevenue(),
     ]);
 
     const data = {
@@ -124,7 +224,12 @@ export async function getPublicStats(req, res) {
         uniquePlayers: engagement.uniquePlayers,
         gamesPerPlayer: engagement.gamesPerPlayer,
         mostActivePlayer: engagement.mostActivePlayer,
-        perkShopRevenueUsdt,
+        /** Lifetime stablecoin inflows (shop sales + tip packs). Not treasury balance. */
+        perkShopRevenueUsdt: perkRevenue.perkShopRevenueUsdt,
+        perkShopRevenueTotalStableUsd: perkRevenue.totalStableUsd,
+        perkShopRevenueByCurrency: perkRevenue.byCurrency,
+        perkShopTreasuryBalanceUsdt: perkRevenue.treasuryBalanceUsdt,
+        perkShopRevenueMethod: perkRevenue.method,
       },
     };
 

@@ -28,6 +28,9 @@ type PublicStatsData = {
     gamesPerPlayer: number;
     mostActivePlayer: MostActivePlayer | null;
     perkShopRevenueUsdt: number | null;
+    perkShopRevenueTotalStableUsd?: number | null;
+    perkShopTreasuryBalanceUsdt?: number | null;
+    perkShopRevenueMethod?: string | null;
   };
 };
 
@@ -74,8 +77,11 @@ function buildStatCards(data: PublicStatsData): StatCard[] {
     cards.push({
       key: "perkRevenue",
       label: "Perk shop revenue",
-      value: formatUsd(e.perkShopRevenueUsdt),
-      sub: "USDT balance",
+      value: formatUsd(e.perkShopRevenueTotalStableUsd ?? e.perkShopRevenueUsdt),
+      sub:
+        e.perkShopTreasuryBalanceUsdt != null
+          ? `Lifetime inflows · treasury left ${formatUsd(e.perkShopTreasuryBalanceUsdt)}`
+          : "Lifetime inflows (not treasury balance)",
     });
     cards.push({
       key: "gamesPerPlayer",
