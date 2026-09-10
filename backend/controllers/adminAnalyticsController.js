@@ -1,5 +1,12 @@
 import logger from "../config/logger.js";
-import { getDashboard, getRecentActivity, getActiveUsersSeries, getNewUsersSeries, getRetentionCohorts } from "../services/analytics.js";
+import {
+  getDashboard,
+  getRecentActivity,
+  getActiveUsersSeries,
+  getNewUsersSeries,
+  getRetentionCohorts,
+  getMinipayStats,
+} from "../services/analytics.js";
 
 /**
  * GET /api/admin/analytics/dashboard
@@ -81,5 +88,22 @@ export async function retention(req, res) {
   } catch (err) {
     logger.error({ err }, "admin analytics retention error");
     res.status(500).json({ success: false, error: "Failed to load retention cohorts" });
+  }
+}
+
+/**
+ * GET /api/admin/analytics/minipay
+ * MiniPay game activity + agent counts. No balances.
+ * Query: startDate, endDate (ISO date strings) for games-over-time window.
+ */
+export async function minipay(req, res) {
+  try {
+    const { startDate, endDate } = req.query;
+    const options = [startDate, endDate].some(Boolean) ? { startDate, endDate } : {};
+    const data = await getMinipayStats(options);
+    res.json({ success: true, data });
+  } catch (err) {
+    logger.error({ err }, "admin analytics minipay error");
+    res.status(500).json({ success: false, error: "Failed to load MiniPay stats" });
   }
 }

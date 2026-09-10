@@ -1,5 +1,5 @@
 import express from "express";
-import { getDashboard, getRecentActivity } from "../services/analytics.js";
+import { getDashboard, getRecentActivity, getMinipayStats } from "../services/analytics.js";
 import logger from "../config/logger.js";
 
 const router = express.Router();
@@ -43,6 +43,24 @@ router.get("/activity", requireAnalyticsAuth, async (req, res) => {
   } catch (err) {
     logger.error({ err }, "Analytics activity error");
     res.status(500).json({ success: false, error: "Failed to load activity" });
+  }
+});
+
+/**
+ * GET /api/analytics/minipay
+ * Public MiniPay game + agent counts (no balances). No auth required.
+ * Query: startDate, endDate (ISO date strings).
+ */
+router.get("/minipay", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const options = [startDate, endDate].some(Boolean) ? { startDate, endDate } : {};
+    const data = await getMinipayStats(options);
+    res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=120");
+    res.json({ success: true, data });
+  } catch (err) {
+    logger.error({ err }, "Analytics minipay error");
+    res.status(500).json({ success: false, error: "Failed to load MiniPay stats" });
   }
 });
 

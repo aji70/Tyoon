@@ -550,3 +550,176 @@ export async function getRecentActivity(limit = 50) {
   const errors = events.filter((e) => e.event_type === "error");
   return { events, errors };
 }
+
+/**
+ * MiniPay activity + agent registry counts.
+ * Intentionally omits balances / treasury / cash (no financial amounts).
+ * @param {object} options - { startDate?, endDate? }
+ */
+export async function getMinipayStats(options = {}) {
+  const now = new Date();
+  const startOfToday = startOfUtcDay(now);
+  const startOfWeek = addUtcDays(startOfToday, -7);
+  const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+  let rangeStart = options.startDate ? new Date(options.startDate) : startOfWeek;
+  let rangeEnd = options.endDate ? new Date(options.endDate) : now;
+  if (Number.isNaN(rangeStart.getTime())) rangeStart = startOfWeek;
+  if (Number.isNaN(rangeEnd.getTime())) rangeEnd = now;
+  if (rangeEnd < rangeStart) [rangeStart, rangeEnd] = [rangeEnd, rangeStart];
+  const dayCount = Math.ceil((rangeEnd - rangeStart) / (24 * 60 * 60 * 1000)) + 1;
+  if (dayCount > 62) rangeStart = new Date(rangeEnd.getTime() - 61 * 24 * 60 * 60 * 1000);
+
+  const hasMinipayCol = await db.schema.hasColumn("game", "is_minipay");
+  const hasAgents = await db.schema.hasTable("user_agents");
+  const hasIsAi = await db.schema.hasColumn("game", "is_ai");
+
+  const emptyGames = {
+    total: 0,
+    byStatus: {},
+    createdToday: 0,
+    finishedToday: 0,
+    createdThisWeek: 0,
+    createdThisMonth: 0,
+    distinctCreators: 0,
+    aiGames: 0,
+    humanGames: 0,
+  };
+
+  let games = { ...emptyGames };
+  let gamesOverTime = [];
+  let note =
+    "Counts use game.is_minipay. Historical rows may include some Celo main-app creates; new MiniPay-app creates are always tagged.";
+
+  if (hasMinipayCol) {
+    const mp = () => db("game").where("is_minipay", 1);
+    const [
+      totalGames,
+      gamesByStatus,
+      createdToday,
+      finishedToday,
+      createdThisWeek,
+      createdThisMonth,
+      distinctCreators,
+      aiSplit,
+      startedByDay,
+      finishedByDay,
+    ] = await Promise.all([
+      mp().count("* as count").first(),
+      mp().select("status").count("* as count").groupBy("status"),
+      mp().where("created_at", ">=", startOfToday).count("* as count").first(),
+      mp().where("status", "FINISHED").where("updated_at", ">=", startOfToday).count("* as count").first(),
+      mp().where("created_at", ">=", startOfWeek).count("* as count").first(),
+      mp().where("created_at", ">=", startOfMonth).count("* as count").first(),
+      mp().whereNotNull("creator_id").countDistinct("creator_id as count").first(),
+      hasIsAi
+        ? mp()
+            .select(db.raw("SUM(CASE WHEN is_ai = 1 THEN 1 ELSE 0 END) as ai"))
+            .select(db.raw("SUM(CASE WHEN is_ai = 0 OR is_ai IS NULL THEN 1 ELSE 0 END) as human"))
+            .first()
+        : Promise.resolve({ ai: 0, human: 0 }),
+      mp()
+        .select(db.raw("DATE(created_at) as day"))
+        .where("created_at", ">=", rangeStart)
+        .where("created_at", "<=", rangeEnd)
+        .groupByRaw("DATE(created_at)")
+        .count("* as count"),
+      mp()
+        .select(db.raw("DATE(updated_at) as day"))
+        .where("status", "FINISHED")
+        .where("updated_at", ">=", rangeStart)
+        .where("updated_at", "<=", rangeEnd)
+        .groupByRaw("DATE(updated_at)")
+        .count("* as count"),
+    ]);
+
+    games = {
+      total: Number(totalGames?.count ?? 0),
+      byStatus: Object.fromEntries((gamesByStatus || []).map((r) => [r.status, Number(r.count)])),
+      createdToday: Number(createdToday?.count ?? 0),
+      finishedToday: Number(finishedToday?.count ?? 0),
+      createdThisWeek: Number(createdThisWeek?.count ?? 0),
+      createdThisMonth: Number(createdThisMonth?.count ?? 0),
+      distinctCreators: Number(distinctCreators?.count ?? 0),
+      aiGames: Number(aiSplit?.ai ?? 0),
+      humanGames: Number(aiSplit?.human ?? 0),
+    };
+
+    const startedMap = Object.fromEntries(
+      (startedByDay || []).map((r) => [toIsoDateString(r.day), Number(r.count)])
+    );
+    const finishedMap = Object.fromEntries(
+      (finishedByDay || []).map((r) => [toIsoDateString(r.day), Number(r.count)])
+    );
+    for (let d = new Date(rangeStart); d <= rangeEnd; d.setDate(d.getDate() + 1)) {
+      const dateStr = toIsoDateString(d);
+      if (!dateStr) continue;
+      gamesOverTime.push({
+        date: dateStr,
+        started: startedMap[dateStr] ?? 0,
+        finished: finishedMap[dateStr] ?? 0,
+      });
+    }
+  } else {
+    note = "game.is_minipay column missing — MiniPay game stats unavailable until migration runs.";
+  }
+
+  let agents = {
+    total: 0,
+    byStatus: {},
+    createdToday: 0,
+    createdThisWeek: 0,
+    createdThisMonth: 0,
+    withErc8004: 0,
+    publicCount: 0,
+  };
+
+  if (hasAgents) {
+    const hasErc = await db.schema.hasColumn("user_agents", "erc8004_agent_id");
+    const hasPublic = await db.schema.hasColumn("user_agents", "is_public");
+    const [
+      totalAgents,
+      byStatus,
+      createdToday,
+      createdThisWeek,
+      createdThisMonth,
+      withErc8004,
+      publicCount,
+    ] = await Promise.all([
+      db("user_agents").count("* as count").first(),
+      db("user_agents").select("status").count("* as count").groupBy("status"),
+      db("user_agents").where("created_at", ">=", startOfToday).count("* as count").first(),
+      db("user_agents").where("created_at", ">=", startOfWeek).count("* as count").first(),
+      db("user_agents").where("created_at", ">=", startOfMonth).count("* as count").first(),
+      hasErc
+        ? db("user_agents").whereNotNull("erc8004_agent_id").count("* as count").first()
+        : Promise.resolve({ count: 0 }),
+      hasPublic
+        ? db("user_agents").where("is_public", 1).count("* as count").first()
+        : Promise.resolve({ count: 0 }),
+    ]);
+
+    agents = {
+      total: Number(totalAgents?.count ?? 0),
+      byStatus: Object.fromEntries((byStatus || []).map((r) => [r.status || "unknown", Number(r.count)])),
+      createdToday: Number(createdToday?.count ?? 0),
+      createdThisWeek: Number(createdThisWeek?.count ?? 0),
+      createdThisMonth: Number(createdThisMonth?.count ?? 0),
+      withErc8004: Number(withErc8004?.count ?? 0),
+      publicCount: Number(publicCount?.count ?? 0),
+    };
+  }
+
+  return {
+    minipayGames: games,
+    gamesOverTime,
+    agents,
+    range: {
+      start: toIsoDateString(rangeStart),
+      end: toIsoDateString(rangeEnd),
+    },
+    excludes: ["balances", "treasury", "cash", "token_holdings", "shop_revenue"],
+    note,
+    generatedAt: now.toISOString(),
+  };
+}

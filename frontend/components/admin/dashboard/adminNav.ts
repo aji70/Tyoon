@@ -11,6 +11,7 @@ export const ADMIN_NAV_ITEMS: { href: string; label: string; exact?: boolean }[]
   { href: "/admin/quests", label: "Quests" },
   { href: "/admin/leaderboard", label: "Leaderboard" },
   { href: "/admin/analytics", label: "Analytics" },
+  { href: "/minipay-stats", label: "MiniPay Stats" },
   { href: "/admin/contracts", label: "Contracts" },
   { href: "/admin/sales", label: "Sales" },
   { href: "/admin/wallet-monitor", label: "Wallet Monitor" },

@@ -71,6 +71,7 @@ router.get("/analytics/activity", adminAnalyticsController.activity);
 router.get("/analytics/active-users", adminAnalyticsController.activeUsers);
 router.get("/analytics/new-users", adminAnalyticsController.newUsers);
 router.get("/analytics/retention", adminAnalyticsController.retention);
+router.get("/analytics/minipay", adminAnalyticsController.minipay);
 
 router.get("/contracts/tx-stats", adminContractsController.getTxStats);
 router.get("/sales/reward", adminSalesController.getRewardSales);

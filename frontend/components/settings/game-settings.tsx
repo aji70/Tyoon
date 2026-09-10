@@ -42,8 +42,8 @@ import {
   useApprove,
 } from "@/context/ContractProvider";
 import { useGuestAuthOptional } from "@/context/GuestAuthContext";
-import { TYCOON_CONTRACT_ADDRESSES, USDC_TOKEN_ADDRESS, MINIPAY_CHAIN_IDS } from "@/constants/contracts";
-import { shouldUseBackendGuestGameFlow } from "@/lib/minipayGuestFlow";
+import { TYCOON_CONTRACT_ADDRESSES, USDC_TOKEN_ADDRESS } from "@/constants/contracts";
+import { shouldUseBackendGuestGameFlow, isMiniPayEmbeddedWallet } from "@/lib/minipayGuestFlow";
 import { Address, parseUnits } from "viem";
 import { getContractErrorMessage } from "@/lib/utils/contractErrors";
 import { usePreventDoubleSubmit } from "@/hooks/usePreventDoubleSubmit";
@@ -76,7 +76,7 @@ export default function GameSettings({ redirectToWaitingRoom = "/game-waiting-3d
   const { data: username } = useGetUsername(address);
   const { data: isUserRegistered, isLoading: isRegisteredLoading } = useIsRegistered(address);
 
-  const isMiniPay = MINIPAY_CHAIN_IDS.includes(wagmiChainId);
+  const isMiniPay = isMiniPayEmbeddedWallet();
   const chainName = caipNetwork?.name?.toLowerCase().replace(" ", "") || `chain-${wagmiChainId}` || "unknown";
 
   const [isFreeGame, setIsFreeGame] = useState(false);
