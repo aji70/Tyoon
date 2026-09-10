@@ -8,7 +8,54 @@ import { Loader2, RefreshCw } from "lucide-react";
 
 type GamesOverDay = { date: string; started: number; finished: number };
 
+type CurrencyBucket = {
+  raw?: string;
+  formatted?: string;
+  decimals?: number;
+};
+
 type MinipayStatsData = {
+  users?: {
+    distinctPlayers: number;
+    distinctCreators: number;
+  };
+  transactions?: {
+    gamesCreated: number;
+    playerJoins: number;
+    onChainGames: number;
+    softPerkPurchases: number;
+    tipPackPurchases: number;
+    total: number;
+  };
+  revenue?: {
+    method: string;
+    note?: string;
+    minipaySoftPerks?: {
+      purchaseCount: number;
+      byCurrency?: Record<string, CurrencyBucket>;
+    };
+    minipayTipPacks?: {
+      purchaseCount: number;
+      usdcFormatted: string;
+    };
+    celoShop?: {
+      scope?: string;
+      note?: string;
+      error?: string;
+      summary?: {
+        collectiblesSold?: number;
+        bundlesSold?: number;
+        totalSales?: number;
+        uniqueBuyers?: number;
+      };
+      revenueByCurrency?: Record<string, CurrencyBucket>;
+      rewardAddress?: string;
+    } | null;
+    houseFees?: {
+      included: boolean;
+      note?: string;
+    };
+  };
   minipayGames: {
     total: number;
     byStatus: Record<string, number>;
@@ -67,6 +114,13 @@ function StatusList({ title, byStatus }: { title: string; byStatus: Record<strin
   );
 }
 
+function formatMoney(bucket?: CurrencyBucket | null) {
+  if (!bucket?.formatted) return "0";
+  const n = Number(bucket.formatted);
+  if (!Number.isFinite(n)) return bucket.formatted;
+  return n.toLocaleString(undefined, { maximumFractionDigits: 6 });
+}
+
 export default function MinipayStatsPublicPage() {
   const [data, setData] = useState<MinipayStatsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,7 +135,6 @@ export default function MinipayStatsPublicPage() {
       const params: Record<string, string> = {};
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
-      // apiClient wraps axios body as `res.data`; backend body is `{ success, data: stats }`.
       const res = await apiClient.get<{ success?: boolean; data?: MinipayStatsData }>(
         "/analytics/minipay",
         params
@@ -124,6 +177,16 @@ export default function MinipayStatsPublicPage() {
     return Math.max(1, ...data.gamesOverTime.map((x) => x.started + x.finished));
   }, [data]);
 
+  const softPerkCurrencies = useMemo(() => {
+    const by = data?.revenue?.minipaySoftPerks?.byCurrency || {};
+    return Object.entries(by).filter(([, v]) => Number(v?.formatted || 0) > 0);
+  }, [data]);
+
+  const shopCurrencies = useMemo(() => {
+    const by = data?.revenue?.celoShop?.revenueByCurrency || {};
+    return Object.entries(by).filter(([, v]) => Number(v?.formatted || 0) > 0);
+  }, [data]);
+
   return (
     <div className="min-h-screen bg-[#061012] text-[#E8F6F7]">
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
@@ -134,7 +197,8 @@ export default function MinipayStatsPublicPage() {
             </p>
             <h1 className="mt-1 font-orbitron text-2xl font-bold text-white">MiniPay Stats</h1>
             <p className="mt-2 max-w-2xl text-sm text-[#9bc4c8]">
-              Live MiniPay-tagged games and agent registry counts. Balances and treasury are not shown.
+              Users, transactions, and lifetime on-chain revenue inflows. Withdrawals do not reduce
+              revenue totals.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -206,6 +270,106 @@ export default function MinipayStatsPublicPage() {
               <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-100/80">
                 {data.note}
               </p>
+            ) : null}
+
+            {data.users || data.transactions ? (
+              <section>
+                <h2 className="mb-3 font-orbitron text-sm font-semibold uppercase tracking-wide text-[#F4C542]/90">
+                  Users & transactions
+                </h2>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <StatCard
+                    label="MiniPay users"
+                    value={data.users?.distinctPlayers ?? 0}
+                    hint="Distinct players in MiniPay-tagged games"
+                  />
+                  <StatCard
+                    label="Creators"
+                    value={data.users?.distinctCreators ?? data.minipayGames.distinctCreators}
+                    hint="Distinct game hosts"
+                  />
+                  <StatCard
+                    label="Attributed txs"
+                    value={data.transactions?.total ?? 0}
+                    hint="Games + joins + soft perks + tip packs"
+                  />
+                  <StatCard
+                    label="On-chain games"
+                    value={data.transactions?.onChainGames ?? 0}
+                    hint="MiniPay games with contract_game_id"
+                  />
+                  <StatCard label="Player joins" value={data.transactions?.playerJoins ?? 0} />
+                  <StatCard
+                    label="Soft perk buys"
+                    value={data.transactions?.softPerkPurchases ?? 0}
+                  />
+                  <StatCard label="Tip pack buys" value={data.transactions?.tipPackPurchases ?? 0} />
+                  <StatCard label="Games created" value={data.transactions?.gamesCreated ?? 0} />
+                </div>
+              </section>
+            ) : null}
+
+            {data.revenue ? (
+              <section>
+                <h2 className="mb-2 font-orbitron text-sm font-semibold uppercase tracking-wide text-emerald-300/90">
+                  On-chain revenue (lifetime inflows)
+                </h2>
+                {data.revenue.note ? (
+                  <p className="mb-3 max-w-3xl text-xs text-[#9bc4c8]">{data.revenue.note}</p>
+                ) : null}
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <StatCard
+                    label="MiniPay tip packs (USDC)"
+                    value={data.revenue.minipayTipPacks?.usdcFormatted ?? "0"}
+                    hint={`${data.revenue.minipayTipPacks?.purchaseCount ?? 0} purchases`}
+                  />
+                  {softPerkCurrencies.length === 0 ? (
+                    <StatCard
+                      label="MiniPay soft perks"
+                      value="0"
+                      hint={`${data.revenue.minipaySoftPerks?.purchaseCount ?? 0} purchases`}
+                    />
+                  ) : (
+                    softPerkCurrencies.map(([token, bucket]) => (
+                      <StatCard
+                        key={token}
+                        label={`MiniPay soft perks (${token})`}
+                        value={formatMoney(bucket)}
+                        hint={`${data.revenue?.minipaySoftPerks?.purchaseCount ?? 0} purchases`}
+                      />
+                    ))
+                  )}
+                  <StatCard
+                    label="Celo shop sales (count)"
+                    value={data.revenue.celoShop?.summary?.totalSales ?? "—"}
+                    hint={
+                      data.revenue.celoShop?.error
+                        ? data.revenue.celoShop.error
+                        : `${data.revenue.celoShop?.summary?.uniqueBuyers ?? 0} unique buyers · all Celo`
+                    }
+                  />
+                </div>
+
+                {shopCurrencies.length > 0 ? (
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {shopCurrencies.map(([token, bucket]) => (
+                      <StatCard
+                        key={`shop-${token}`}
+                        label={`Celo shop revenue (${token})`}
+                        value={formatMoney(bucket)}
+                        hint="From CollectibleBought / BundleBought events — not treasury balance"
+                      />
+                    ))}
+                  </div>
+                ) : null}
+
+                {data.revenue.houseFees?.note ? (
+                  <p className="mt-3 text-xs text-[#6a9096]">{data.revenue.houseFees.note}</p>
+                ) : null}
+                {data.revenue.celoShop?.note ? (
+                  <p className="mt-1 text-xs text-[#6a9096]">{data.revenue.celoShop.note}</p>
+                ) : null}
+              </section>
             ) : null}
 
             <section>
